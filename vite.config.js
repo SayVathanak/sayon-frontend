@@ -15,4 +15,8 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
+  server: {
+    host: true, // This exposes the app to your local network (Wi-Fi)
+    port: 5173  // Optional: keeps the port consistent
+  }
 })
