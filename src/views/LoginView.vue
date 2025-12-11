@@ -18,11 +18,16 @@ async function handleLogin() {
 
     try {
         await auth.login(form);
-        // Redirect based on role
-        if (auth.user.role === 'admin') router.push({ name: 'admin-dashboard' });
-        else router.push({ name: 'pos-main' });
+        
+        // 💡 SAFETY CHECK: Only check role if user exists!
+        if (auth.user && auth.user.role === 'admin') {
+             router.push({ name: 'admin-dashboard' });
+        } else if (auth.user) {
+             router.push({ name: 'pos-main' });
+        }
     } catch (err) {
-        errorMsg.value = err.message || 'Invalid credentials.';
+        // This will now show "Invalid credentials" properly
+        errorMsg.value = err.response?.data?.message || err.message || 'Login failed.';
     } finally {
         isLoading.value = false;
     }
