@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+@theme {
+  /* This tells Tailwind v4 to use Roboto for 'font-sans' */
+  --font-sans: "Roboto", sans-serif;
+}
+
+/* 🔒 FORCE OVERRIDE: This guarantees the browser uses it */
+:root {
+  font-family: "Roboto", sans-serif;
+}
+
+body {
+  font-family: "Roboto", sans-serif;
+}

@@ -1,33 +1,26 @@
-// sayon-frontend/src/stores/menu.js
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import apiClient from '../services/api'; 
+import apiClient from '../services/api';
 
 export const useMenuStore = defineStore('menu', () => {
-    // --- STATE ---
-    // Stores menu grouped by category (e.g., {'Hot Coffee': [...], 'Pastries': [...]})
-    const menuData = ref({}); 
-    const categories = ref([]); // Stores category names for display order
+    const menuData = ref({});
+    const categories = ref([]);
     const isLoading = ref(false);
     const error = ref(null);
 
-    // --- ACTIONS ---
     async function fetchMenu() {
         isLoading.value = true;
         error.value = null;
-
         try {
-            // This call automatically includes the JWT token set during login
-            const response = await apiClient.get('/menu'); 
-            
+            const response = await apiClient.get('/menu');
             menuData.value = response.data;
-            // Extract and set categories for use in the UI tabs/headers
-            categories.value = Object.keys(response.data); 
+            categories.value = Object.keys(response.data);
             
-            return response.data;
+            // 💡 DEBUG: Check if we are actually receiving options
+            console.log("🔥 Menu Loaded:", response.data); 
         } catch (err) {
-            error.value = err.response?.data?.error || 'Failed to connect to menu API.';
-            console.error('Menu Fetch Error:', err);
+            console.error('Fetch menu error:', err);
+            error.value = 'Failed to load menu.';
         } finally {
             isLoading.value = false;
         }
