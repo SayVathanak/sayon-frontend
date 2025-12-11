@@ -17,21 +17,26 @@ async function handleLogin() {
     errorMsg.value = '';
 
     try {
-        await auth.login(form);
+        // 💡 FIX: Pass username and password as separate arguments
+        const success = await auth.login(form.username, form.password);
         
-        // 💡 SAFETY CHECK: Only check role if user exists!
-        if (auth.user && auth.user.role === 'admin') {
-             router.push({ name: 'admin-dashboard' });
-        } else if (auth.user) {
-             router.push({ name: 'pos-main' });
+        if (success && auth.user) {
+            if (auth.user.role === 'admin') {
+                router.push({ name: 'admin-dashboard' });
+            } else {
+                router.push({ name: 'pos-main' });
+            }
+        } else {
+            errorMsg.value = 'Invalid username or password.';
         }
     } catch (err) {
-        // This will now show "Invalid credentials" properly
-        errorMsg.value = err.response?.data?.message || err.message || 'Login failed.';
+        console.error("Login Failed:", err);
+        errorMsg.value = 'Invalid username or password.';
     } finally {
         isLoading.value = false;
     }
 }
+
 </script>
 
 <template>
