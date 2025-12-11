@@ -52,17 +52,14 @@ export const useCartStore = defineStore('cart', () => {
         isSubmitting.value = true;
         submissionError.value = null;
 
-        // Prepare data structure for the backend POST /api/orders
+        // ✅ FIX: Match the exact structure your backend expects
         const orderData = {
-            total_amount: totalPrice.value, 
-            // Map cart items to the simpler structure required by the database
+            total: parseFloat(totalPrice.value),  // ✅ Changed from "total_amount" to "total"
             items: cartItems.value.map(item => ({
-                product_id: item.product_id,
+                product_id: item.original_id || item.product_id,  // ✅ Use original_id for products with options
                 quantity: item.quantity,
-                unit_price: parseFloat(item.price),
-                notes: item.notes
-            })),
-            // staff_name is pulled from the JWT payload on the backend
+                price: parseFloat(item.price),  // ✅ Changed from "unit_price" to "price"
+            }))
         };
 
         try {

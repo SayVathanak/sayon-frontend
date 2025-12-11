@@ -93,9 +93,9 @@ function confirmOptions() {
         
     const productToAdd = {
         ...selectedProduct.value,
-        product_id: `${selectedProduct.value.product_id}-${optionsText}`,
+        product_id: `${selectedProduct.value.product_id}-${optionsText}`, // Unique ID for cart
         name: `${selectedProduct.value.name} ${optionsText ? '(' + optionsText + ')' : ''}`,
-        original_id: selectedProduct.value.product_id
+        original_id: selectedProduct.value.product_id // ✅ Keep original DB ID
     };
 
     cart.addItem(productToAdd);
