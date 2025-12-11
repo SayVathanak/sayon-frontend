@@ -23,8 +23,7 @@ export const useCartStore = defineStore('cart', () => {
         if (existingItem) {
             existingItem.quantity++;
         } else {
-            // Add quantity and notes fields for a new item
-            cartItems.value.push({ ...product, quantity: 1, notes: '' });
+            cartItems.value.push({ ...product, quantity: 1 });
         }
     }
 
@@ -37,7 +36,7 @@ export const useCartStore = defineStore('cart', () => {
         if (item) {
             item.quantity = quantity;
             if (item.quantity <= 0) {
-                 removeItem(productId); // Remove if quantity drops to zero
+                 removeItem(productId);
             }
         }
     }
@@ -52,24 +51,40 @@ export const useCartStore = defineStore('cart', () => {
         isSubmitting.value = true;
         submissionError.value = null;
 
-        // ✅ FIX: Match the exact structure your backend expects
+        // Prepare order payload matching backend expectations
         const orderData = {
-            total: parseFloat(totalPrice.value),  // ✅ Changed from "total_amount" to "total"
-            items: cartItems.value.map(item => ({
-                product_id: item.original_id || item.product_id,  // ✅ Use original_id for products with options
-                quantity: item.quantity,
-                price: parseFloat(item.price),  // ✅ Changed from "unit_price" to "price"
-            }))
+            total: parseFloat(totalPrice.value),
+            items: cartItems.value.map(item => {
+                // Use original_id if it exists (for customized products), otherwise use product_id
+                const productId = item.original_id || item.product_id;
+                
+                console.log('🛒 Mapping cart item:', {
+                    cartId: item.product_id,
+                    dbId: productId,
+                    name: item.name,
+                    qty: item.quantity,
+                    price: item.price
+                });
+
+                return {
+                    product_id: productId,
+                    quantity: item.quantity,
+                    price: parseFloat(item.price)
+                };
+            })
         };
+
+        console.log('📤 Submitting order:', orderData);
 
         try {
             const response = await apiClient.post('/orders', orderData);
+            console.log('✅ Order submitted successfully:', response.data);
             
-            clearCart(); // Clear cart on successful transaction commit
+            clearCart();
             return response.data; 
         } catch (error) {
             submissionError.value = 'Order submission failed. Please check the backend log.';
-            console.error('Order Submission Error:', error);
+            console.error('❌ Order Submission Error:', error.response?.data || error.message);
             throw error;
         } finally {
             isSubmitting.value = false;

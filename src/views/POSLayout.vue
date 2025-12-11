@@ -93,15 +93,23 @@ function confirmOptions() {
         
     const productToAdd = {
         ...selectedProduct.value,
-        product_id: `${selectedProduct.value.product_id}-${optionsText}`, // Unique ID for cart
-        name: `${selectedProduct.value.name} ${optionsText ? '(' + optionsText + ')' : ''}`,
-        original_id: selectedProduct.value.product_id // ✅ Keep original DB ID
+        // Create a unique cart ID that includes options
+        product_id: `${selectedProduct.value.product_id}-${Date.now()}-${optionsText}`,
+        // Store the original numeric ID for the database
+        original_id: selectedProduct.value.product_id,
+        // Update the display name with options
+        name: `${selectedProduct.value.name} (${optionsText})`,
+        // Keep other properties
+        price: selectedProduct.value.price,
+        image_url: selectedProduct.value.image_url,
+        category_name: selectedProduct.value.category_name
     };
 
     cart.addItem(productToAdd);
     showOptionsModal.value = false;
     selectedProduct.value = null;
 }
+
 
 function adjustQty(item, delta) {
     if (isPaymentMode.value) return; 
