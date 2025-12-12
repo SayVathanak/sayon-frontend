@@ -1,14 +1,15 @@
 <script setup>
-import { onMounted, ref, computed, reactive, watch } from 'vue';
+import { onMounted, ref, computed, reactive, watch, nextTick } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { useMenuStore } from '../stores/menu';
 import { useCartStore } from '../stores/cart';
 import { sendToCustomer } from '../services/dualScreen';
 import { useAutoAnimate } from '@formkit/auto-animate/vue';
+import ReceiptTemplate from '@/components/ReceiptTemplate.vue';
 import { 
     LogOut, Search, ShoppingBag, Plus, Minus, Trash2, 
     Coffee, X, CreditCard, Loader2, ExternalLink, RefreshCcw, Check, 
-    ChevronRight, SlidersHorizontal, LayoutGrid, Tag, Settings, Menu
+    ChevronRight, SlidersHorizontal, LayoutGrid, Tag, Settings, Menu, Monitor
 } from 'lucide-vue-next';
 
 const auth = useAuthStore();
@@ -20,6 +21,10 @@ const showMobileCart = ref(false);
 const searchQuery = ref('');
 const activeCategory = ref('All');
 const isPaymentMode = ref(false);
+
+// --- RECEIPT STATE ---
+const showReceipt = ref(false);
+const lastOrder = ref(null);
 
 // --- OPTION MODAL STATE ---
 const showOptionsModal = ref(false);
@@ -33,7 +38,6 @@ onMounted(() => {
 // --- HELPER: Image Optimization ---
 function getThumbnail(url) {
     if (!url) return '';
-    // Resize Cloudinary images to 200px (or similar) to save massive bandwidth
     if (url.includes('cloudinary.com') && url.includes('/upload/')) {
         return url.replace('/upload/', '/upload/w_300,h_400,c_fill,q_auto,f_auto/');
     }
@@ -70,6 +74,7 @@ watch(() => cart.cartItems, (newItems) => {
 }, { deep: true });
 
 function openCustomerScreen() {
+    // 👈 ADDED: Function to open the dual screen
     window.open('/customer', 'CustomerDisplay', 'width=1000,height=800,menubar=no,toolbar=no');
 }
 
@@ -136,16 +141,46 @@ function handleCancelOrder() {
 
 async function handlePaymentSuccess() {
     try {
+        // 1. Prepare Receipt Data
+        lastOrder.value = {
+            id: Math.floor(Math.random() * 90000) + 10000, 
+            items: JSON.parse(JSON.stringify(cart.cartItems)),
+            total: cart.totalPrice
+        };
+
+        // 2. Submit to DB
         await cart.submitOrder();
+        
+        // 3. Notify Customer Screen
         sendToCustomer('PAYMENT_SUCCESS', {});
+        
+        // 4. Switch mode
         isPaymentMode.value = false;
-    } catch (err) { alert("Error saving order."); }
+        
+        // 💡 THE FIX: Wait for Vue to render the ReceiptTemplate
+        await nextTick(); 
+        
+        // 💡 EXTRA SAFETY: Wait a tiny bit more for the browser layout
+        setTimeout(() => {
+            window.print();
+        }, 100);
+
+    } catch (err) { 
+        alert("Error saving order: " + err.message); 
+    }
 }
 </script>
 
 <template>
-  <div class="flex h-screen bg-[#F8F9FD] font-sans text-slate-800 overflow-hidden selection:bg-blue-100 selection:text-blue-900">
+  <div class="flex h-screen bg-[#F8F9FD] font-sans text-slate-800 overflow-hidden selection:bg-blue-100 selection:text-blue-900 touch-action-manipulation">
     
+    <ReceiptTemplate 
+        v-if="lastOrder"
+        :orderId="lastOrder.id" 
+        :items="lastOrder.items" 
+        :total="lastOrder.total" 
+    />
+
     <aside class="hidden md:flex flex-col w-24 lg:w-64 bg-white border-r border-slate-100 h-full shrink-0 z-20">
         <div class="h-20 flex items-center justify-center lg:justify-start lg:px-8 border-b border-slate-50">
             <div class="w-10 h-10 bg-blue-600 text-white flex items-center justify-center rounded-xl shadow-lg shadow-blue-200">
@@ -189,25 +224,54 @@ async function handlePaymentSuccess() {
     </aside>
 
     <main class="flex-1 flex flex-col min-w-0 h-full relative" :class="{'opacity-50 pointer-events-none grayscale': isPaymentMode}">
-        <header class="h-20 px-6 flex items-center justify-between shrink-0">
+        
+        <header class="h-20 px-6 flex items-center justify-between shrink-0 bg-white md:bg-transparent border-b md:border-none border-slate-100">
             <div class="flex flex-col">
-                <h2 class="text-xl font-bold text-slate-900">{{ activeCategory === 'All' ? 'All Menu' : activeCategory }}</h2>
-                <p class="text-xs text-slate-400 font-medium">{{ filteredProducts.length }} items available</p>
+                <h2 class="text-xl font-bold text-slate-900">{{ activeCategory === 'All' ? 'Menu' : activeCategory }}</h2>
+                <p class="text-xs text-slate-400 font-medium hidden md:block">{{ filteredProducts.length }} items available</p>
             </div>
             
-            <div class="relative w-64 md:w-80 group">
-                <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size="18" />
-                <input 
-                    v-model="searchQuery" 
-                    type="text" 
-                    placeholder="Search for something sweet..." 
-                    class="w-full pl-11 pr-4 py-3 bg-white border border-transparent focus:border-blue-100 rounded-2xl text-sm font-medium shadow-sm focus:ring-4 focus:ring-blue-50 focus:outline-none transition-all placeholder-slate-400" 
-                    :disabled="isPaymentMode"
-                >
+            <div class="flex items-center gap-3">
+                <button @click="openCustomerScreen" class="md:hidden p-2 text-slate-400 hover:text-blue-600 bg-white rounded-xl shadow-sm border border-slate-100">
+                    <Monitor size="20"/>
+                </button>
+                <button @click="openCustomerScreen" class="hidden md:flex items-center gap-2 px-3 py-2 text-slate-500 hover:text-blue-600 bg-white rounded-xl text-xs font-bold shadow-sm border border-slate-100 transition-all">
+                    <Monitor size="16"/> Customer Screen
+                </button>
+
+                <div class="relative w-40 md:w-80 group">
+                    <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size="18" />
+                    <input 
+                        v-model="searchQuery" 
+                        type="text" 
+                        placeholder="Search..." 
+                        class="w-full pl-11 pr-4 py-3 bg-white border border-transparent focus:border-blue-100 rounded-2xl text-sm font-medium shadow-sm focus:ring-4 focus:ring-blue-50 focus:outline-none transition-all placeholder-slate-400" 
+                        :disabled="isPaymentMode"
+                    >
+                </div>
             </div>
         </header>
 
-        <div class="flex-1 overflow-y-auto p-6 pt-0 pb-32 sm:pb-6 custom-scrollbar">
+        <div class="md:hidden flex gap-2 overflow-x-auto px-6 py-2 scrollbar-hide shrink-0">
+             <button 
+                @click="activeCategory = 'All'"
+                class="px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border"
+                :class="activeCategory === 'All' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-100'"
+            >
+                All Items
+            </button>
+            <button 
+                v-for="cat in menu.categories" 
+                :key="cat"
+                @click="activeCategory = cat"
+                class="px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border"
+                :class="activeCategory === cat ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200' : 'bg-white text-slate-500 border-slate-100'"
+            >
+                {{ cat }}
+            </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-6 pt-2 md:pt-0 pb-32 sm:pb-6 custom-scrollbar">
             <div v-if="menu.isLoading" class="flex flex-col items-center justify-center h-64 gap-4">
                 <Loader2 class="animate-spin w-8 h-8 text-blue-600" />
                 <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Loading Menu...</p>
@@ -365,8 +429,24 @@ async function handlePaymentSuccess() {
 </template>
 
 <style>
+/* 💡 ADDED: Disables double-tap zoom on buttons and inputs
+   This makes the app feel native on mobile
+*/
+.touch-action-manipulation {
+    touch-action: manipulation;
+}
+
 /* Clean scrollbar for modern browsers */
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #e2e8f0; border-radius: 20px; }
+
+/* Hide scrollbar for category list */
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+.scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
 </style>
