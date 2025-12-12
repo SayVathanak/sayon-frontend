@@ -63,34 +63,50 @@ defineProps({
 </script>
 
 <style scoped>
+/* 1. HIDE EVERYTHING ELSE */
 @media print {
-  /* Hide the rest of the app */
-  body * {
-    visibility: hidden; 
+  body, 
+  #app, 
+  .pos-layout, 
+  main, 
+  aside, 
+  header, 
+  .touch-action-manipulation {
+    visibility: hidden !important;
+    display: none !important; /* Force layout removal */
+    height: 0 !important;
+    width: 0 !important;
+    overflow: hidden !important;
   }
 
-  /* Show only the receipt */
-  #receipt-print-area, #receipt-print-area * {
-    visibility: visible;
-  }
-
-  /* Force the receipt to the top-left */
+  /* 2. SHOW ONLY THE RECEIPT */
   #receipt-print-area {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 58mm; /* Limits width to your paper size */
-    padding: 0;
-    margin: 0;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 12px; /* Ensure font isn't too huge */
-    color: black;
+    visibility: visible !important;
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important; /* Let printer driver handle width */
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white;
+    z-index: 999999 !important; /* Sit on top of everything */
+  }
+
+  /* 3. SHOW CHILDREN OF RECEIPT */
+  #receipt-print-area * {
+    visibility: visible !important;
   }
   
-  /* CRITICAL: Removes default browser sheet margins */
+  /* 4. REMOVE BROWSER MARGINS */
   @page {
     size: auto;
-    margin: 0mm; 
+    margin: 0;
   }
+}
+
+/* Hide receipt on normal screen */
+.hidden-print-layout {
+  display: none;
 }
 </style>
