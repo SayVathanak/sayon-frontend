@@ -10,6 +10,10 @@
   --font-sans: "Roboto", sans-serif;
 }
 
+[data-sonner-toaster] {
+    z-index: 9999 !important;
+}
+
 /* 4. Global Font Reset */
 :root, body {
   font-family: "Roboto", sans-serif;

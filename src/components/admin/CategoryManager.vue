@@ -93,6 +93,9 @@
 import { ref, reactive, computed, onMounted, nextTick } from 'vue';
 import { useCategoryStore } from '../../stores/categories'; 
 import { Search, Plus, Trash2, X, Layers } from 'lucide-vue-next';
+// 1. IMPORT LIBRARIES
+import Swal from 'sweetalert2';
+import { toast } from 'vue-sonner';
 
 // --- Styles Constants ---
 const inputClass = "w-full px-3 py-2 bg-slate-50 border-none rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all";
@@ -131,7 +134,6 @@ function openAddModal() {
   form.id = null;
   form.name = '';
   showModal.value = true;
-  // Focus input automatically
   nextTick(() => nameInput.value?.focus());
 }
 
@@ -155,23 +157,45 @@ async function handleSubmit() {
   try {
     if (isEditing.value) {
       await store.updateCategory(form.id, form.name);
+      toast.success('Category updated successfully!'); // ✅ Toast Success
     } else {
       await store.addCategory(form.name);
+      toast.success('Category added successfully!'); // ✅ Toast Success
     }
     closeModal();
   } catch (err) {
-    // Error handled by store (displayed in template via store.error)
+    // Keep store error for UI, but also show toast
+    toast.error('Failed to save category.'); 
   } finally {
     isSubmitting.value = false;
   }
 }
 
 async function confirmDelete(category) {
-  if (confirm(`Delete category "${category.name}"?\n(This will fail if products are still assigned to it)`)) {
+  // ✅ SWEETALERT CONFIRMATION
+  const result = await Swal.fire({
+      title: 'Delete Category?',
+      text: `Are you sure you want to delete "${category.name}"?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444', // Red for delete
+      cancelButtonColor: '#94a3b8',
+      confirmButtonText: 'Yes, delete it',
+      customClass: {
+          popup: 'rounded-2xl font-sans',
+          title: 'text-slate-800 text-lg font-black',
+          confirmButton: 'rounded-xl text-sm font-bold px-4 py-2',
+          cancelButton: 'rounded-xl text-sm font-bold px-4 py-2'
+      }
+  });
+
+  if (result.isConfirmed) {
     try {
       await store.deleteCategory(category.category_id);
+      toast.success(`Category "${category.name}" deleted.`); // ✅ Toast Success
     } catch (err) {
-      alert(store.error); // Show the "Cannot delete" error
+      // ✅ Toast Error (Instead of alert)
+      toast.error(store.error || 'Cannot delete category. It might contain products.');
     }
   }
 }

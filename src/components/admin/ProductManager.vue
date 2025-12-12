@@ -20,7 +20,7 @@
       </button>
     </div>
 
-    <div class="flex gap-2 overflow-x-auto pb-2">
+    <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
       <button 
         @click="selectedCategory = 'all'"
         :class="[
@@ -82,7 +82,7 @@
           
           <div class="mt-2 flex items-end justify-between">
             <span class="text-sm font-black text-blue-600">${{ Number(product.price).toFixed(2) }}</span>
-            <span class="text-[10px] text-slate-400 font-medium">Qty: {{ product.stock_quantity }}</span>
+            <span class="text-[10px] text-slate-400 font-medium">Cost: ${{ Number(product.cost_price || 0).toFixed(2) }}</span>
           </div>
         </div>
 
@@ -131,13 +131,9 @@
               <input v-model.number="form.price" type="number" step="0.01" required :class="inputClass" />
             </div>
 
-            <div>
+            <div class="col-span-2">
               <label :class="labelClass">Cost ($)</label>
-              <input v-model.number="form.cost_price" type="number" step="0.01" :class="inputClass" />
-            </div>
-            <div>
-              <label :class="labelClass">Stock</label>
-              <input v-model.number="form.stock_quantity" type="number" :class="inputClass" />
+              <input v-model.number="form.cost_price" type="number" step="0.01" :class="inputClass" placeholder="Cost to make (optional)" />
             </div>
 
             <div class="col-span-2">
@@ -186,15 +182,15 @@ import { Search, Plus, Coffee, Trash2, X, ChevronDown, UploadCloud } from 'lucid
 import { useProductStore } from '../../stores/products';
 import { useCategoryStore } from '../../stores/categories';
 import apiClient from '../../services/api'; 
+import Swal from 'sweetalert2';
+import { toast } from 'vue-sonner';
 
-// --- Compact Styles (Defined as JS to avoid Tailwind v4 Errors) ---
 const inputClass = "w-full px-3 py-2 bg-slate-50 border-none rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all";
-const labelClass = "block text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1"; // 👈 Defined here!
+const labelClass = "block text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1";
 
 const productStore = useProductStore();
 const categoryStore = useCategoryStore();
 
-// --- State ---
 const searchQuery = ref('');
 const selectedCategory = ref('all');
 const showModal = ref(false);
@@ -202,13 +198,13 @@ const isEditing = ref(false);
 const isSubmitting = ref(false);
 const isUploading = ref(false);
 
+// 💡 STOCK REMOVED FROM FORM OBJECT
 const form = reactive({
   product_id: null,
   category_id: null,
   name: '',
   price: 0,
   cost_price: 0,
-  stock_quantity: 0,
   image_url: '',
   is_available: true
 });
@@ -218,7 +214,6 @@ onMounted(() => {
   categoryStore.fetchCategories();
 });
 
-// --- Filter Logic ---
 const filteredProducts = computed(() => {
   let products = productStore.productList;
   if (selectedCategory.value !== 'all') {
@@ -226,20 +221,19 @@ const filteredProducts = computed(() => {
   }
   if (searchQuery.value) {
     const query = searchQuery.value.toLowerCase();
-    products = products.filter(p => 
-      p.name.toLowerCase().includes(query)
-    );
+    products = products.filter(p => p.name.toLowerCase().includes(query));
   }
   return products;
 });
 
-// --- Actions ---
 async function handleFileUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
+    
     if (file.size > 5 * 1024 * 1024) {
-        alert("File too big (Max 5MB)");
-        event.target.value = ''; return;
+        toast.error("File too big! Max size is 5MB.");
+        event.target.value = ''; 
+        return;
     }
 
     isUploading.value = true;
@@ -249,14 +243,22 @@ async function handleFileUpload(event) {
     try {
         const res = await apiClient.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }});
         form.image_url = res.data.url;
+        toast.success("Image uploaded!");
     } catch (err) {
-        alert('Upload failed: ' + (err.response?.data?.error || "Error"));
+        toast.error('Upload failed: ' + (err.response?.data?.error || "Error"));
         event.target.value = ''; 
-    } finally { isUploading.value = false; }
+    } finally { 
+        isUploading.value = false; 
+    }
 }
 
 function resetForm() {
-  Object.assign(form, { product_id: null, category_id: null, name: '', price: 0, cost_price: 0, stock_quantity: 0, image_url: '', is_available: true });
+  // 💡 STOCK REMOVED FROM RESET LOGIC
+  Object.assign(form, { 
+    product_id: null, category_id: null, name: '', 
+    price: 0, cost_price: 0, 
+    image_url: '', is_available: true 
+  });
 }
 
 function openAddModal() { isEditing.value = false; resetForm(); showModal.value = true; }
@@ -267,16 +269,46 @@ async function handleSubmit() {
   if (isUploading.value) return;
   isSubmitting.value = true;
   try {
-    if (isEditing.value) await productStore.updateProduct(form.product_id, form);
-    else await productStore.addProduct(form);
+    if (isEditing.value) {
+        await productStore.updateProduct(form.product_id, form);
+        toast.success('Product updated successfully');
+    } else {
+        await productStore.addProduct(form);
+        toast.success('New product added to inventory');
+    }
     closeModal();
-  } catch (err) { alert(err.message); } 
-  finally { isSubmitting.value = false; }
+  } catch (err) { 
+    toast.error(err.message || 'Failed to save product');
+  } finally { 
+    isSubmitting.value = false; 
+  }
 }
 
 async function handleDeleteProduct(id, name) {
-  if(confirm(`Delete "${name}"?`)) {
-    try { await productStore.deleteProduct(id); } catch (err) { alert(err.message); }
-  }
+    const result = await Swal.fire({
+        title: 'Delete Product?',
+        text: `Are you sure you want to delete "${name}"?`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444', 
+        cancelButtonColor: '#94a3b8',  
+        confirmButtonText: 'Yes, delete it!',
+        cancelButtonText: 'Cancel',
+        customClass: {
+            popup: 'rounded-2xl font-sans',
+            title: 'text-slate-800 text-lg font-black',
+            confirmButton: 'rounded-xl text-sm font-bold px-4 py-2',
+            cancelButton: 'rounded-xl text-sm font-bold px-4 py-2'
+        }
+    });
+
+    if (result.isConfirmed) {
+        try {
+            await productStore.deleteProduct(id);
+            toast.success('Product deleted successfully');
+        } catch (err) {
+            toast.error(err.message);
+        }
+    }
 }
 </script>
