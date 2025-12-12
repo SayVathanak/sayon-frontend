@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref, computed } from 'vue';
+import { onMounted, reactive, ref, computed, watch } from 'vue'; // Added watch here
 import { useAuthStore } from '../stores/auth';
 import { useProductStore } from '../stores/products';
 import { useBranchStore } from '../stores/branches';
@@ -10,7 +10,8 @@ import { useRouter } from 'vue-router';
 import { useAutoAnimate } from '@formkit/auto-animate/vue';
 import {
     LayoutDashboard, ShoppingBag, Settings, LogOut, Plus, Edit, Trash2, X, Layers,
-    Search, Store, MapPin, Loader2, ListPlus, UploadCloud, TrendingUp, Users, Wallet, Menu, Coffee, ArrowUpRight
+    Search, Store, MapPin, Loader2, ListPlus, UploadCloud, TrendingUp, Users, Wallet, Menu, Coffee, ArrowUpRight,
+    Calendar, Filter // Added new icons here
 } from 'lucide-vue-next';
 
 const auth = useAuthStore();
@@ -19,15 +20,22 @@ const branchStore = useBranchStore();
 const router = useRouter();
 const [animationParent] = useAutoAnimate();
 
+// 1. DEFINE STATE VARIABLES FIRST
 const activeTab = ref('dashboard');
 const searchQuery = ref('');
 const showProductModal = ref(false);
 
-// Data
+// Stats Data
 const stats = reactive({ totalSales: 0, totalOrders: 0, topProduct: 'Loading...' });
 const branchStats = ref([]);
 
-// Product Form
+// --- NEW: Sales Report State (MUST BE DEFINED HERE) ---
+const reportPeriod = ref('today'); 
+const reportBranch = ref('all');
+const salesReport = ref([]);
+const isReportLoading = ref(false);
+
+// Product Form State
 const isEditing = ref(false);
 const editingId = ref(null);
 const isUploading = ref(false);
@@ -35,21 +43,45 @@ const productForm = reactive({
     category_id: 1, name: '', price: 0.00, is_available: true,
     image_url: '', options: []
 });
-// Option Builder State
 const newOptionName = ref('');
 const newOptionValues = ref('');
-
-// Branch Form
 const newBranch = reactive({ username: '', password: '', name: '' });
 
+// 2. DEFINE WATCHERS AFTER VARIABLES
+watch([reportPeriod, reportBranch], () => {
+    fetchSalesReport();
+});
+
+// 3. LIFECYCLE HOOKS
 onMounted(() => {
     if (auth.user?.role !== 'admin' && !auth.user) {
-        // Logic handled by router guard ideally
+        // logic
     }
     products.fetchAllProducts();
     branchStore.fetchBranches();
     fetchStats();
+    fetchSalesReport(); // Call this immediately on load
 });
+
+// 4. FUNCTIONS
+
+// --- NEW: Sales Report Function ---
+async function fetchSalesReport() {
+    isReportLoading.value = true;
+    try {
+        const res = await apiClient.get('/stats/sales-report', {
+            params: {
+                period: reportPeriod.value,
+                branch_id: reportBranch.value
+            }
+        });
+        salesReport.value = res.data;
+    } catch (err) {
+        console.error("Report error:", err);
+    } finally {
+        isReportLoading.value = false;
+    }
+}
 
 async function fetchStats() {
     try {
@@ -64,6 +96,8 @@ const filteredProducts = computed(() => {
     if (!searchQuery.value) return products.productList;
     return products.productList.filter(p => p.name.toLowerCase().includes(searchQuery.value.toLowerCase()));
 });
+
+// ... (Rest of your functions: openAddModal, startEdit, handleFileUpload, etc. stay the same)
 
 // --- Modal & Form Logic ---
 function openAddModal() { resetForm(); showProductModal.value = true; }
@@ -85,15 +119,7 @@ function addOptionGroup() {
 function removeOptionGroup(index) { productForm.options.splice(index, 1); }
 
 async function handleFileUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    isUploading.value = true;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-        const response = await apiClient.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-        productForm.image_url = response.data.url;
-    } catch (err) { alert("Upload failed."); } finally { isUploading.value = false; }
+    // ... your existing upload logic
 }
 
 async function handleSubmit() {
@@ -170,84 +196,74 @@ function handleLogout() { auth.logout(); router.push({ name: 'login' }); }
 
         <main class="flex-1 overflow-y-auto p-6 md:p-10 relative pb-24 md:pb-10" ref="animationParent">
 
-            <div v-if="activeTab === 'dashboard'"
-                class="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div class="flex justify-between items-center">
+            <div class="bg-white p-8 rounded-4xl shadow-sm border border-slate-100 mt-8">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                     <div>
-                        <h2 class="text-3xl font-black text-slate-900 tracking-tight">Overview</h2>
-                        <p class="text-slate-400 font-medium mt-1">Today's performance metrics.</p>
+                        <h3 class="font-bold text-lg text-slate-900 flex items-center gap-2">
+                            <ListPlus class="text-blue-600" size="20" /> Detailed Sales Report
+                        </h3>
+                        <p class="text-sm text-slate-400 font-medium">Breakdown of items sold by period.</p>
                     </div>
-                    <div class="text-right">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">{{ new
-                            Date().toLocaleDateString() }}</p>
-                    </div>
-                </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div
-                        class="bg-white p-6 rounded-4xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-50 relative overflow-hidden group">
-                        <div class="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform">
-                            <Wallet size="80" class="text-blue-600" />
+                    <div class="flex items-center gap-3 bg-slate-50 p-2 rounded-2xl">
+                        <div class="relative">
+                            <Calendar class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="14" />
+                            <select v-model="reportPeriod"
+                                class="pl-9 pr-4 py-2 bg-white rounded-xl text-xs font-bold text-slate-700 outline-none border border-slate-200 shadow-sm focus:border-blue-500 appearance-none cursor-pointer min-w-[120px]">
+                                <option value="today">Today</option>
+                                <option value="week">This Week</option>
+                                <option value="month">This Month</option>
+                            </select>
                         </div>
-                        <p class="text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">Total Sales</p>
-                        <div class="flex items-baseline gap-2">
-                            <h3 class="text-4xl font-black text-slate-900">${{ stats.totalSales.toLocaleString() }}</h3>
-                            <span
-                                class="text-xs font-bold text-green-500 bg-green-50 px-2 py-1 rounded-lg flex items-center gap-1">
-                                <ArrowUpRight size="12" /> +12%
-                            </span>
-                        </div>
-                    </div>
-                    <div
-                        class="bg-white p-6 rounded-4xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-50 relative overflow-hidden group">
-                        <div class="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform">
-                            <ShoppingBag size="80" class="text-purple-600" />
-                        </div>
-                        <p class="text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">Total Orders</p>
-                        <div class="flex items-baseline gap-2">
-                            <h3 class="text-4xl font-black text-slate-900">{{ stats.totalOrders }}</h3>
-                        </div>
-                    </div>
-                    <div
-                        class="bg-white p-6 rounded-4xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-50 relative overflow-hidden group">
-                        <div class="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform">
-                            <TrendingUp size="80" class="text-amber-500" />
-                        </div>
-                        <p class="text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">Top Product</p>
-                        <div class="flex items-baseline gap-2">
-                            <h3 class="text-2xl font-black text-slate-900 truncate">{{ stats.topProduct }}</h3>
+
+                        <div class="relative">
+                            <Filter class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="14" />
+                            <select v-model="reportBranch"
+                                class="pl-9 pr-4 py-2 bg-white rounded-xl text-xs font-bold text-slate-700 outline-none border border-slate-200 shadow-sm focus:border-blue-500 appearance-none cursor-pointer min-w-[140px]">
+                                <option value="all">All Branches</option>
+                                <option v-for="branch in branchStore.branchList" :key="branch.user_id"
+                                    :value="branch.user_id">
+                                    {{ branch.name }}
+                                </option>
+                            </select>
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-4xl shadow-sm border border-slate-100 overflow-hidden">
-                    <div class="p-8 border-b border-slate-50">
-                        <h3 class="font-bold text-lg text-slate-900">Branch Performance</h3>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left min-w-[600px]">
-                            <thead class="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
-                                <tr>
-                                    <th class="p-6">Branch</th>
-                                    <th class="p-6 text-right">Orders</th>
-                                    <th class="p-6 text-right">Revenue</th>
-                                    <th class="p-6 hidden md:table-cell">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody class="text-sm">
-                                <tr v-for="(branch, idx) in branchStats" :key="idx"
-                                    class="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                                    <td class="p-6 font-bold text-slate-900">{{ branch.branch_name }}</td>
-                                    <td class="p-6 text-right font-mono text-slate-600">{{ branch.total_orders }}</td>
-                                    <td class="p-6 text-right font-bold text-slate-900 font-mono">${{
-                                        Number(branch.total_revenue).toFixed(2) }}</td>
-                                    <td class="p-6 hidden md:table-cell"><span
-                                            class="px-3 py-1 bg-green-50 text-green-600 rounded-full text-xs font-bold">Active</span>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="overflow-hidden rounded-2xl border border-slate-100">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+                            <tr>
+                                <th class="p-4">Item Name</th>
+                                <th class="p-4 text-center">Qty Sold</th>
+                                <th class="p-4 text-right">Revenue Generated</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-sm divide-y divide-slate-50">
+                            <tr v-if="isReportLoading">
+                                <td colspan="3" class="p-8 text-center text-slate-400">
+                                    <Loader2 class="animate-spin mx-auto mb-2" /> Loading data...
+                                </td>
+                            </tr>
+                            <tr v-else-if="salesReport.length === 0">
+                                <td colspan="3" class="p-8 text-center text-slate-400 font-medium">
+                                    No sales found for this period.
+                                </td>
+                            </tr>
+                            <tr v-else v-for="(item, idx) in salesReport" :key="idx"
+                                class="group hover:bg-blue-50/30 transition-colors">
+                                <td class="p-4 font-bold text-slate-700">{{ item.product_name }}</td>
+                                <td class="p-4 text-center">
+                                    <span class="bg-slate-100 text-slate-600 px-2 py-1 rounded-lg text-xs font-bold">
+                                        {{ item.total_quantity }}
+                                    </span>
+                                </td>
+                                <td class="p-4 text-right font-mono font-bold text-slate-900">
+                                    ${{ Number(item.total_revenue).toFixed(2) }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

@@ -1,155 +1,177 @@
 <template>
-  <div class="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+  <div class="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
     
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-3xl shadow-sm border border-slate-100">
-      <div class="relative flex-1 w-full md:max-w-md ml-2">
-        <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size="18" />
+    <div class="flex flex-col md:flex-row justify-between items-center gap-3 bg-white p-3 rounded-2xl shadow-sm border border-slate-100">
+      <div class="relative flex-1 w-full md:max-w-md ml-1">
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="16" />
         <input 
           v-model="searchQuery" 
           type="text" 
-          placeholder="Search inventory..."
-          class="w-full pl-12 pr-4 py-3 bg-slate-50 border-none rounded-2xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all"
+          placeholder="Search..."
+          class="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all"
         >
       </div>
       
       <button 
         @click="openAddModal"
-        class="bg-blue-600 text-white px-6 py-3 rounded-2xl text-sm font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200 flex items-center gap-2"
+        class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors shadow-md shadow-blue-200 flex items-center gap-2"
       >
-        <Plus size="18" /> New Product
+        <Plus size="16" /> <span class="hidden sm:inline">New Product</span>
       </button>
     </div>
 
-    <div v-if="productStore.isLoading" class="text-center py-12 text-slate-400">Loading inventory...</div>
-    <div v-if="productStore.error" class="p-4 bg-red-50 text-red-600 rounded-2xl border border-red-100">{{ productStore.error }}</div>
+    <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+      <button 
+        @click="selectedCategory = 'all'"
+        :class="[
+          'px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all border',
+          selectedCategory === 'all' 
+            ? 'bg-slate-800 text-white border-slate-800 shadow-md' 
+            : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'
+        ]"
+      >
+        All Items
+      </button>
 
-    <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <button 
+        v-for="cat in categoryStore.categories" 
+        :key="cat.category_id"
+        @click="selectedCategory = cat.category_id"
+        :class="[
+          'px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all border',
+          selectedCategory === cat.category_id 
+            ? 'bg-blue-600 text-white border-blue-600 shadow-md' 
+            : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'
+        ]"
+      >
+        {{ cat.name }}
+      </button>
+    </div>
+
+    <div v-if="productStore.isLoading" class="text-center py-12 text-slate-400 text-sm">Loading inventory...</div>
+    <div v-if="productStore.error" class="p-4 bg-red-50 text-red-600 rounded-2xl border border-red-100 text-sm">{{ productStore.error }}</div>
+
+    <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
       <div 
         v-for="product in filteredProducts" 
         :key="product.product_id" 
         @click="startEdit(product)"
-        class="bg-white p-4 rounded-3xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-xl hover:shadow-blue-900/5 transition-all cursor-pointer group relative border border-slate-100"
+        class="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group relative flex flex-col"
       >
-        <div class="aspect-square bg-slate-50 rounded-2xl mb-4 overflow-hidden relative">
+        <div class="aspect-3/4 bg-slate-50 rounded-xl mb-3 overflow-hidden relative">
           <img 
             v-if="product.image_url" 
             :src="product.image_url" 
             class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
           />
           <div v-else class="w-full h-full flex items-center justify-center">
-            <Coffee size="32" class="text-slate-300" />
+            <Coffee size="24" class="text-slate-300" />
           </div>
-          
-          <div v-if="!product.is_available" class="absolute inset-0 bg-white/60 backdrop-blur-[2px] flex items-center justify-center">
-            <span class="bg-slate-800 text-white text-xs px-2 py-1 rounded-full font-bold">Unavailable</span>
+          <div v-if="!product.is_available" class="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex items-center justify-center">
+            <span class="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">Hidden</span>
           </div>
         </div>
 
-        <div class="px-1">
-          <div class="flex justify-between items-start mb-2">
-            <h3 class="font-bold text-slate-900 leading-tight truncate pr-2">{{ product.name }}</h3>
-            <span class="text-sm font-black text-blue-600">${{ Number(product.price).toFixed(2) }}</span>
+        <div class="flex-1 flex flex-col justify-between">
+          <div>
+            <h3 class="font-bold text-slate-800 text-sm leading-tight line-clamp-2 mb-1">{{ product.name }}</h3>
+            <p class="text-[10px] text-slate-400 font-medium bg-slate-50 inline-block px-1.5 py-0.5 rounded">
+              {{ product.category_name || 'No Cat' }}
+            </p>
           </div>
-          <p class="text-xs text-slate-400 font-medium bg-slate-50 inline-block px-2 py-1 rounded-lg">
-            {{ product.category_name || 'Uncategorized' }}
-          </p>
+          
+          <div class="mt-2 flex items-end justify-between">
+            <span class="text-sm font-black text-blue-600">${{ Number(product.price).toFixed(2) }}</span>
+            <span class="text-[10px] text-slate-400 font-medium">Qty: {{ product.stock_quantity }}</span>
+          </div>
         </div>
 
         <button 
           @click.stop="handleDeleteProduct(product.product_id, product.name)"
-          class="absolute top-4 right-4 p-2 bg-white/80 backdrop-blur rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100 shadow-sm"
+          class="absolute top-2 right-2 p-1.5 bg-white/90 backdrop-blur rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100 shadow-sm"
         >
-          <Trash2 size="16" />
+          <Trash2 size="14" />
         </button>
       </div>
     </div>
 
     <div v-if="showModal" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-all">
-      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8 animate-in zoom-in-95 duration-200">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 animate-in zoom-in-95 duration-200">
         
-        <div class="flex justify-between items-center mb-6">
-          <h3 class="text-xl font-black text-slate-800">{{ isEditing ? 'Edit Product' : 'New Product' }}</h3>
+        <div class="flex justify-between items-center mb-5">
+          <h3 class="text-lg font-black text-slate-800">{{ isEditing ? 'Edit Product' : 'New Product' }}</h3>
           <button @click="closeModal" class="text-slate-400 hover:text-slate-600 transition-colors">
-            <X size="24" />
+            <X size="20" />
           </button>
         </div>
         
-        <form @submit.prevent="handleSubmit" class="space-y-6">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <form @submit.prevent="handleSubmit" class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
             
             <div class="col-span-2">
-              <label class="block text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Product Name</label>
-              <input v-model="form.name" type="text" required 
-                class="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all"
-                placeholder="e.g. Iced Latte" />
+              <label :class="labelClass">Product Name</label>
+              <input v-model="form.name" type="text" required :class="inputClass" placeholder="e.g. Iced Latte" />
             </div>
 
             <div class="col-span-1">
-              <label class="block text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Category</label>
+              <label :class="labelClass">Category</label>
               <div class="relative">
-                <select v-model="form.category_id" required 
-                  class="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none appearance-none cursor-pointer">
-                  <option :value="null" disabled>Select Category</option>
+                <select v-model="form.category_id" required :class="inputClass + ' appearance-none cursor-pointer'">
+                  <option :value="null" disabled>Select...</option>
                   <option v-for="cat in categoryStore.categories" :key="cat.category_id" :value="cat.category_id">
                     {{ cat.name }}
                   </option>
                 </select>
-                <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                  <ChevronDown size="16" />
-                </div>
+                <ChevronDown size="14" class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
               </div>
             </div>
 
             <div class="col-span-1">
-              <label class="block text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Price ($)</label>
-              <input v-model.number="form.price" type="number" step="0.01" required 
-                class="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all" />
+              <label :class="labelClass">Price ($)</label>
+              <input v-model.number="form.price" type="number" step="0.01" required :class="inputClass" />
             </div>
 
             <div>
-              <label class="block text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Cost ($)</label>
-              <input v-model.number="form.cost_price" type="number" step="0.01" 
-                class="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all" />
+              <label :class="labelClass">Cost ($)</label>
+              <input v-model.number="form.cost_price" type="number" step="0.01" :class="inputClass" />
             </div>
             <div>
-              <label class="block text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Stock Qty</label>
-              <input v-model.number="form.stock_quantity" type="number" 
-                class="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all" />
+              <label :class="labelClass">Stock</label>
+              <input v-model.number="form.stock_quantity" type="number" :class="inputClass" />
             </div>
 
             <div class="col-span-2">
-              <label class="block text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Image URL</label>
-              <div class="flex gap-3">
-                <input v-model="form.image_url" type="text" placeholder="https://..." 
-                  class="flex-1 px-4 py-3 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all" />
-                <button type="button" @click="form.image_url = ''" 
-                  class="px-4 py-3 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl font-bold text-sm transition-colors">
-                  Clear
-                </button>
-              </div>
-              <div v-if="form.image_url" class="mt-3">
-                <img :src="form.image_url" class="h-20 w-20 object-cover rounded-xl border border-slate-100 shadow-sm" alt="Preview" />
+              <label :class="labelClass">Product Image</label>
+              <div class="flex items-center gap-3">
+                <div class="w-16 h-16 bg-slate-50 rounded-lg border border-slate-100 flex items-center justify-center overflow-hidden shrink-0">
+                   <img v-if="form.image_url" :src="form.image_url" class="w-full h-full object-cover" />
+                   <div v-else-if="isUploading" class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                   <UploadCloud v-else size="20" class="text-slate-300" />
+                </div>
+                <div class="flex-1">
+                   <input 
+                      type="file" @change="handleFileUpload" accept="image/*"
+                      class="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                   />
+                   <button v-if="form.image_url" type="button" @click="form.image_url = ''" class="text-red-500 text-[10px] font-bold mt-1 hover:underline">
+                      Remove Image
+                   </button>
+                </div>
               </div>
             </div>
 
-            <div class="col-span-2">
-              <label class="block text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Description</label>
-              <textarea v-model="form.description" rows="3" 
-                class="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all resize-none"></textarea>
-            </div>
-
-            <div class="col-span-2 flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
-              <input v-model="form.is_available" type="checkbox" id="avail" class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300" />
+            <div class="col-span-2 flex items-center gap-2 pt-2">
+              <input v-model="form.is_available" type="checkbox" id="avail" class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
               <label for="avail" class="text-sm font-bold text-slate-700 cursor-pointer select-none">Available for Sale</label>
             </div>
           </div>
 
-          <div class="flex justify-end gap-3 pt-6 border-t border-slate-100">
-            <button type="button" @click="closeModal" class="px-6 py-3 text-slate-500 hover:bg-slate-50 rounded-xl font-bold transition-all">Cancel</button>
+          <div class="flex justify-end gap-2 pt-4 border-t border-slate-100">
+            <button type="button" @click="closeModal" class="px-4 py-2 text-slate-500 hover:bg-slate-50 rounded-xl text-sm font-bold transition-all">Cancel</button>
             <button type="submit" 
-              class="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              :disabled="isSubmitting">
-              {{ isSubmitting ? 'Saving...' : (isEditing ? 'Update Product' : 'Create Product') }}
+              class="px-6 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 shadow-md shadow-blue-200 transition-all disabled:opacity-50"
+              :disabled="isSubmitting || isUploading">
+              {{ isSubmitting ? 'Saving...' : 'Save Product' }}
             </button>
           </div>
         </form>
@@ -160,25 +182,30 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
-import { Search, Plus, Coffee, Trash2, X, ChevronDown } from 'lucide-vue-next';
+import { Search, Plus, Coffee, Trash2, X, ChevronDown, UploadCloud } from 'lucide-vue-next';
 import { useProductStore } from '../../stores/products';
 import { useCategoryStore } from '../../stores/categories';
+import apiClient from '../../services/api'; 
 
-// Stores
+// --- Compact Styles (Defined as JS to avoid Tailwind v4 Errors) ---
+const inputClass = "w-full px-3 py-2 bg-slate-50 border-none rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none transition-all";
+const labelClass = "block text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1"; // 👈 Defined here!
+
 const productStore = useProductStore();
 const categoryStore = useCategoryStore();
 
-// State
+// --- State ---
 const searchQuery = ref('');
+const selectedCategory = ref('all');
 const showModal = ref(false);
 const isEditing = ref(false);
 const isSubmitting = ref(false);
+const isUploading = ref(false);
 
 const form = reactive({
   product_id: null,
   category_id: null,
   name: '',
-  description: '',
   price: 0,
   cost_price: 0,
   stock_quantity: 0,
@@ -186,87 +213,70 @@ const form = reactive({
   is_available: true
 });
 
-// Load Data
 onMounted(() => {
   productStore.fetchAllProducts();
   categoryStore.fetchCategories();
 });
 
-// Filter Products Logic
+// --- Filter Logic ---
 const filteredProducts = computed(() => {
-  if (!searchQuery.value) return productStore.productList;
-  const query = searchQuery.value.toLowerCase();
-  return productStore.productList.filter(p => 
-    p.name.toLowerCase().includes(query) || 
-    (p.category_name && p.category_name.toLowerCase().includes(query))
-  );
+  let products = productStore.productList;
+  if (selectedCategory.value !== 'all') {
+    products = products.filter(p => p.category_id === selectedCategory.value);
+  }
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase();
+    products = products.filter(p => 
+      p.name.toLowerCase().includes(query)
+    );
+  }
+  return products;
 });
 
 // --- Actions ---
+async function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+        alert("File too big (Max 5MB)");
+        event.target.value = ''; return;
+    }
+
+    isUploading.value = true;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await apiClient.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }});
+        form.image_url = res.data.url;
+    } catch (err) {
+        alert('Upload failed: ' + (err.response?.data?.error || "Error"));
+        event.target.value = ''; 
+    } finally { isUploading.value = false; }
+}
 
 function resetForm() {
-  Object.assign(form, {
-    product_id: null,
-    category_id: null,
-    name: '',
-    description: '',
-    price: 0,
-    cost_price: 0,
-    stock_quantity: 0,
-    image_url: '',
-    is_available: true
-  });
+  Object.assign(form, { product_id: null, category_id: null, name: '', price: 0, cost_price: 0, stock_quantity: 0, image_url: '', is_available: true });
 }
 
-function openAddModal() {
-  isEditing.value = false;
-  resetForm();
-  showModal.value = true;
-}
-
-function startEdit(product) {
-  isEditing.value = true;
-  Object.assign(form, {
-    product_id: product.product_id,
-    category_id: product.category_id,
-    name: product.name,
-    description: product.description,
-    price: product.price,
-    cost_price: product.cost_price,
-    stock_quantity: product.stock_quantity,
-    image_url: product.image_url,
-    is_available: product.is_available
-  });
-  showModal.value = true;
-}
-
-function closeModal() {
-  showModal.value = false;
-}
+function openAddModal() { isEditing.value = false; resetForm(); showModal.value = true; }
+function startEdit(p) { isEditing.value = true; Object.assign(form, p); showModal.value = true; }
+function closeModal() { showModal.value = false; }
 
 async function handleSubmit() {
+  if (isUploading.value) return;
   isSubmitting.value = true;
   try {
-    if (isEditing.value) {
-      await productStore.updateProduct(form.product_id, form);
-    } else {
-      await productStore.addProduct(form);
-    }
+    if (isEditing.value) await productStore.updateProduct(form.product_id, form);
+    else await productStore.addProduct(form);
     closeModal();
-  } catch (err) {
-    alert("Error: " + err.message);
-  } finally {
-    isSubmitting.value = false;
-  }
+  } catch (err) { alert(err.message); } 
+  finally { isSubmitting.value = false; }
 }
 
 async function handleDeleteProduct(id, name) {
-  if(confirm(`Are you sure you want to delete "${name}"?`)) {
-    try {
-      await productStore.deleteProduct(id);
-    } catch (err) {
-      alert("Failed to delete: " + err.message);
-    }
+  if(confirm(`Delete "${name}"?`)) {
+    try { await productStore.deleteProduct(id); } catch (err) { alert(err.message); }
   }
 }
 </script>
