@@ -58,55 +58,61 @@
 defineProps({
   orderId: [String, Number],
   items: Array,
-  total: [Number, String] // 💡 FIX 3: Allow String or Number
+  total: [Number, String]
 });
 </script>
 
 <style>
-/* 1. HIDE EVERYTHING ELSE */
+/* ⚠️ IMPORTANT: NO 'scoped' here! We need global print rules. */
+
 @media print {
-  body, 
-  #app, 
-  .pos-layout, 
-  main, 
-  aside, 
-  header, 
-  .touch-action-manipulation {
-    visibility: hidden !important;
-    display: none !important; /* Force layout removal */
-    height: 0 !important;
-    width: 0 !important;
-    overflow: hidden !important;
+  /* 1. Hide EVERYTHING on the page */
+  body * {
+    visibility: hidden;
   }
 
-  /* 2. SHOW ONLY THE RECEIPT */
-  #receipt-print-area {
-    visibility: visible !important;
-    display: block !important;
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: 100% !important; /* Let printer driver handle width */
-    margin: 0 !important;
-    padding: 0 !important;
-    background: white;
-    z-index: 999999 !important; /* Sit on top of everything */
+  /* 2. Lock the page size so it doesn't try to scroll */
+  html, body {
+    height: 100vh;
+    overflow: hidden;
   }
 
-  /* 3. SHOW CHILDREN OF RECEIPT */
+  /* 3. Make only the receipt visible */
+  #receipt-print-area, 
   #receipt-print-area * {
     visibility: visible !important;
   }
-  
-  /* 4. REMOVE BROWSER MARGINS */
+
+  /* 4. Position the receipt at the very top-left of the paper */
+  #receipt-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%; /* Let printer driver decide width (58mm) */
+    margin: 0;
+    padding: 0;
+    
+    /* Optional: Ensure font is dark black for thermal paper */
+    color: black;
+    font-family: 'Courier New', Courier, monospace; 
+  }
+
+  /* 5. Clear browser margins */
   @page {
     size: auto;
     margin: 0;
   }
 }
 
-/* Hide receipt on normal screen */
+/* On normal screen, keep the receipt hidden */
 .hidden-print-layout {
   display: none;
+}
+
+/* On print screen, show it */
+@media print {
+  .hidden-print-layout {
+    display: block !important;
+  }
 }
 </style>
