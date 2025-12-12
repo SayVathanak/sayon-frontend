@@ -5,6 +5,7 @@ import { useProductStore } from '../stores/products';
 import { useBranchStore } from '../stores/branches';
 import apiClient from '../services/api';
 import CategoryManager from '../components/admin/CategoryManager.vue';
+import ProductManager from '@/components/admin/ProductManager.vue';
 import { useRouter } from 'vue-router';
 import { useAutoAnimate } from '@formkit/auto-animate/vue';
 import {
@@ -254,7 +255,11 @@ function handleLogout() { auth.logout(); router.push({ name: 'login' }); }
                 <CategoryManager />
             </div>
 
-            <div v-if="activeTab === 'products'"
+            <div v-if="activeTab === 'products'">
+                <ProductManager />
+            </div>
+
+            <!-- <div v-if="activeTab === 'products'"
                 class="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div
                     class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-3xl shadow-sm border border-slate-100">
@@ -293,7 +298,7 @@ function handleLogout() { auth.logout(); router.push({ name: 'login' }); }
                         </button>
                     </div>
                 </div>
-            </div>
+            </div> -->
 
             <div v-if="activeTab === 'settings'"
                 class="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
