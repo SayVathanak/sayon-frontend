@@ -30,6 +30,16 @@ onMounted(() => {
     menu.fetchMenu();
 });
 
+// --- HELPER: Image Optimization ---
+function getThumbnail(url) {
+    if (!url) return '';
+    // Resize Cloudinary images to 200px (or similar) to save massive bandwidth
+    if (url.includes('cloudinary.com') && url.includes('/upload/')) {
+        return url.replace('/upload/', '/upload/w_300,h_400,c_fill,q_auto,f_auto/');
+    }
+    return url;
+}
+
 // --- FILTER LOGIC ---
 const filteredProducts = computed(() => {
     let products = [];
@@ -216,7 +226,7 @@ async function handlePaymentSuccess() {
                     class="group cursor-pointer bg-white rounded-3xl p-3 shadow-[0_2px_10px_rgb(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-transparent hover:border-blue-100 transition-all duration-300 flex flex-col relative"
                 >
                     <div class="aspect-3/4 bg-slate-50 rounded-2xl mb-3 relative overflow-hidden">
-                        <img v-if="product.image_url" :src="product.image_url" class="w-full h-full object-cover transition-transform duration-500" />
+                        <img v-if="product.image_url" :src="getThumbnail(product.image_url)" class="w-full h-full object-cover transition-transform duration-500" />
                         <div v-else class="w-full h-full flex items-center justify-center text-slate-200">
                             <Coffee size="32" />
                         </div>
@@ -229,11 +239,8 @@ async function handlePaymentSuccess() {
                     <div class="flex-1 flex flex-col justify-between px-1">
                         <div>
                             <h3 class="font-bold text-xs text-slate-800 leading-tight">{{ product.name }}</h3>
-                            <!-- <h3 class="font-bold text-xs text-slate-800 leading-tight mb-1">{{ product.name }}</h3> -->
-                            <!-- <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{{ product.category_name }}</p> -->
                         </div>
                         <div class="mt-1 flex items-center justify-between">
-                        <!-- <div class="mt-3 flex items-center justify-between"> -->
                             <span class="text-base font-black text-blue-600">${{ Number(product.price).toFixed(2) }}</span>
                             <div class="w-8 h-8 rounded-full bg-slate-50 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center text-slate-300 transition-all shadow-sm">
                                 <Plus size="16" stroke-width="3" />
@@ -270,7 +277,7 @@ async function handlePaymentSuccess() {
                 :class="{'opacity-50 grayscale': isPaymentMode}"
             >
                 <div class="w-16 h-16 bg-slate-50 rounded-xl shrink-0 overflow-hidden">
-                        <img v-if="item.image_url" :src="item.image_url" class="w-full h-full object-cover" />
+                        <img v-if="item.image_url" :src="getThumbnail(item.image_url)" class="w-full h-full object-cover" />
                 </div>
                 <div class="flex-1 min-w-0 flex flex-col justify-between py-1">
                     <div class="flex justify-between items-start">
@@ -337,7 +344,7 @@ async function handlePaymentSuccess() {
         <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" @click="showOptionsModal = false"></div>
         <div class="relative w-full max-w-sm bg-white rounded-4xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
             <div class="flex items-start gap-4 mb-6">
-                <div class="w-20 h-20 bg-slate-50 rounded-2xl overflow-hidden shrink-0"><img v-if="selectedProduct?.image_url" :src="selectedProduct.image_url" class="w-full h-full object-cover" /></div>
+                <div class="w-20 h-20 bg-slate-50 rounded-2xl overflow-hidden shrink-0"><img v-if="selectedProduct?.image_url" :src="getThumbnail(selectedProduct.image_url)" class="w-full h-full object-cover" /></div>
                 <div>
                     <h3 class="font-black text-xl text-slate-900">{{ selectedProduct?.name }}</h3>
                     <p class="text-sm font-bold text-blue-600 mt-1">${{ selectedProduct?.price }}</p>

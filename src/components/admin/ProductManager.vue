@@ -20,7 +20,7 @@
       </button>
     </div>
 
-    <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+    <div class="flex gap-2 overflow-x-auto pb-2">
       <button 
         @click="selectedCategory = 'all'"
         :class="[
