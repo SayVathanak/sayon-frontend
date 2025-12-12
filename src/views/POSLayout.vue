@@ -3,13 +3,12 @@ import { onMounted, ref, computed, reactive, watch, nextTick } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { useMenuStore } from '../stores/menu';
 import { useCartStore } from '../stores/cart';
-import { sendToCustomer } from '../services/dualScreen';
+import { sendToCustomer } from '../services/dualScreen'; // 👈 IMPORTED
 import { useAutoAnimate } from '@formkit/auto-animate/vue';
-import ReceiptTemplate from '@/components/ReceiptTemplate.vue';
+import ReceiptTemplate from '../components/ReceiptTemplate.vue'; 
 import { 
-    LogOut, Search, ShoppingBag, Plus, Minus, Trash2, 
-    Coffee, X, CreditCard, Loader2, ExternalLink, RefreshCcw, Check, 
-    ChevronRight, SlidersHorizontal, LayoutGrid, Tag, Settings, Menu, Monitor
+    LogOut, Search, ShoppingBag, Plus, Minus, X, 
+    Coffee, Loader2, LayoutGrid, Monitor
 } from 'lucide-vue-next';
 
 const auth = useAuthStore();
@@ -23,7 +22,6 @@ const activeCategory = ref('All');
 const isPaymentMode = ref(false);
 
 // --- RECEIPT STATE ---
-const showReceipt = ref(false);
 const lastOrder = ref(null);
 
 // --- OPTION MODAL STATE ---
@@ -63,7 +61,8 @@ const filteredProducts = computed(() => {
     });
 });
 
-// --- DUAL SCREEN SYNC ---
+// --- DUAL SCREEN LOGIC (RESTORED) ---
+// 1. Sync Cart Changes
 watch(() => cart.cartItems, (newItems) => {
     if (!isPaymentMode.value) {
         sendToCustomer('UPDATE_CART', { 
@@ -73,8 +72,8 @@ watch(() => cart.cartItems, (newItems) => {
     }
 }, { deep: true });
 
+// 2. Open Window Helper
 function openCustomerScreen() {
-    // 👈 ADDED: Function to open the dual screen
     window.open('/customer', 'CustomerDisplay', 'width=1000,height=800,menubar=no,toolbar=no');
 }
 
@@ -123,11 +122,13 @@ function adjustQty(item, delta) {
 function handleCheckoutStart() {
     if (cart.cartItems.length === 0) return;
     isPaymentMode.value = true;
+    // 💡 Notify Customer Screen: Show QR Code
     sendToCustomer('SHOW_PAYMENT', { total: cart.totalPrice });
 }
 
 function handleUpdateOrder() {
     isPaymentMode.value = false;
+    // 💡 Notify Customer Screen: Back to Cart
     sendToCustomer('UPDATE_CART', { items: JSON.parse(JSON.stringify(cart.cartItems)), total: cart.totalPrice });
 }
 
@@ -151,16 +152,14 @@ async function handlePaymentSuccess() {
         // 2. Submit to DB
         await cart.submitOrder();
         
-        // 3. Notify Customer Screen
+        // 3. Notify Customer Screen: Success
         sendToCustomer('PAYMENT_SUCCESS', {});
         
         // 4. Switch mode
         isPaymentMode.value = false;
         
-        // 💡 THE FIX: Wait for Vue to render the ReceiptTemplate
+        // 5. Print Logic
         await nextTick(); 
-        
-        // 💡 EXTRA SAFETY: Wait a tiny bit more for the browser layout
         setTimeout(() => {
             window.print();
         }, 100);
@@ -429,24 +428,12 @@ async function handlePaymentSuccess() {
 </template>
 
 <style>
-/* 💡 ADDED: Disables double-tap zoom on buttons and inputs
-   This makes the app feel native on mobile
-*/
 .touch-action-manipulation {
     touch-action: manipulation;
 }
-
-/* Clean scrollbar for modern browsers */
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #e2e8f0; border-radius: 20px; }
-
-/* Hide scrollbar for category list */
-.scrollbar-hide::-webkit-scrollbar {
-    display: none;
-}
-.scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-}
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 </style>
