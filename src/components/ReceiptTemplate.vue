@@ -62,7 +62,7 @@ defineProps({
 });
 </script>
 
-<style scoped>
+<style>
 /* 1. HIDE EVERYTHING ELSE */
 @media print {
   body, 
