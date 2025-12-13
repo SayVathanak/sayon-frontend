@@ -37,36 +37,32 @@ const router = createRouter({
   ]
 });
 
-// Navigation Guard: Handles Authentication and Role-Based Redirection
 router.beforeEach((to, from, next) => {
-  // 💡 IMPORTANT: Initialize the store inside the guard function
   const auth = useAuthStore();
-
   const requiredRoles = to.meta.roles;
 
-  // 1. Check if the destination requires authentication AND the user is NOT authenticated
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return next({ name: 'login' });
   }
 
-  // 2. If the user IS authenticated, check role and login redirection
   if (auth.isAuthenticated) {
-    const userRole = auth.user.role;
+    
+    const userRole = auth.user?.role; 
 
-    // If logged in and trying to go to the login page, redirect based on role
+    if (!userRole) {
+        auth.logout();
+        return next({ name: 'login' });
+    }
+
     if (to.name === 'login') {
-      // Admin goes to Admin Dashboard, Cashier goes to POS
       return next({ name: userRole === 'admin' ? 'admin-dashboard' : 'pos-main' });
     }
 
-    // Check 3: Role Authorization (Check if the user has the required role for the route)
     if (requiredRoles && !requiredRoles.includes(userRole)) {
-      // Logged in, but wrong role. Send them to their default route.
       return next({ name: userRole === 'admin' ? 'admin-dashboard' : 'pos-main' });
     }
   }
 
-  // 3. Proceed to the route
   next();
 });
 

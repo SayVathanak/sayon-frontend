@@ -1,11 +1,9 @@
-// sayon-frontend/src/stores/auth.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api'; 
 
 export const useAuthStore = defineStore('auth', () => {
   // --- STATE ---
-  // Initial values are set to null; they will be loaded later in the initialize block
   const token = ref(null);
   const user = ref(null);
   const authError = ref(null);
@@ -22,7 +20,12 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null;
     localStorage.removeItem('authToken');
     localStorage.removeItem('authUser');
+    
+    // Remove the header so future requests fail cleanly
     delete apiClient.defaults.headers.common['Authorization'];
+    
+    // Optional: Force a refresh or redirect to ensure the Login screen appears
+    // window.location.href = '/login'; 
   }
 
   async function login(username, password) {
@@ -48,7 +51,6 @@ export const useAuthStore = defineStore('auth', () => {
       
     } catch (error) {
       authError.value = error.response?.data?.message || 'Login failed.';
-      // We call logout on failed login attempt to ensure state is clean
       logout(); 
       return false;
     } finally {
@@ -56,35 +58,45 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  
-  // --- DEFENSIVE INITIALIZATION LOGIC (Fixes the infinite loop issue) ---
+  // --- ✅ NEW: AUTOMATIC LOGOUT INTERCEPTOR ---
+  // This watches every response from the server. 
+  // If the server says "401 Unauthorized" (expired token), we log out immediately.
+  apiClient.interceptors.response.use(
+    (response) => response, 
+    (error) => {
+      if (error.response && error.response.status === 401) {
+        console.warn('Session expired (401). Logging out automatically.');
+        logout();
+      }
+      return Promise.reject(error);
+    }
+  );
+
+  // --- INITIALIZATION LOGIC ---
   const initialize = () => {
-    // Load initial data from storage
     const storedToken = localStorage.getItem('authToken');
     const storedUser = JSON.parse(localStorage.getItem('authUser'));
 
-    // Set token header if it exists
+    // Set header immediately if token exists
     if (storedToken) {
         apiClient.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
     }
 
-    // 💡 DEFENSIVE CHECK: Validate that all essential pieces of the session are present (token AND role)
+    // Defensive check: Ensure we have both a token AND a valid user object with a role
     if (storedToken && storedUser && storedUser.role) {
-        // Data is valid, set state
         token.value = storedToken;
         user.value = storedUser;
     } else if (storedToken || storedUser) {
-        // 🚨 SAFETY NET: Corrupted or incomplete session found (token without user, or user without role).
-        // Force a clean logout immediately to prevent the router from crashing/looping.
-        console.warn("Corrupted session detected. Performing clean logout.");
+        // Partial/Corrupted data found? Clean it up.
+        console.warn("Corrupted session detected during init. Logging out.");
         logout(); 
     }
   };
 
-  // Execute initialization logic when the store is first defined
+  // Run initialization
   initialize();
 
-  // --- RETURN STATEMENT ---
+  // --- RETURN ---
   return { 
     token, user, authError, isLoading,
     isAuthenticated, userName, 

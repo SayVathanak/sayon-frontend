@@ -8,62 +8,42 @@ import { useAutoAnimate } from '@formkit/auto-animate/vue';
 import ReceiptTemplate from '../components/ReceiptTemplate.vue';
 import {
     LogOut, Search, ShoppingBag, Plus, Minus, X,
-    Coffee, Loader2, Trash2, Printer, Monitor, Settings, Check, Menu
+    Coffee, Loader2, Printer, Monitor, Settings, Check,
+    User, Menu, Droplets
 } from 'lucide-vue-next';
 
+// --- STORES ---
 const auth = useAuthStore();
 const menu = useMenuStore();
 const cart = useCartStore();
 
+// --- REFS & STATE ---
 const [cartListRef] = useAutoAnimate();
 const showMobileCart = ref(false);
 const searchQuery = ref('');
 const activeCategory = ref('All');
-
-// --- STATE: Payment Mode ---
 const isPaymentMode = ref(false);
-
-// --- STATE: Settings & Print Toggle ---
 const showSettingsModal = ref(false);
 const enablePrint = ref(true);
-
-// --- RECEIPT STATE ---
 const lastOrder = ref(null);
-
-// --- OPTION MODAL STATE ---
-const showOptionsModal = ref(false);
-const selectedProduct = ref(null);
-const currentOptions = reactive({});
-
 const now = ref(new Date());
 
+// --- LIFECYCLE ---
 onMounted(() => {
     menu.fetchMenu();
-    // Start Timer
     const timer = setInterval(() => now.value = new Date(), 1000);
     onUnmounted(() => clearInterval(timer));
 });
 
+// --- COMPUTED ---
 const formattedTime = computed(() =>
-    now.value.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-    })
-);
-const formattedDate = computed(() =>
-    now.value.toLocaleDateString('en-US', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short'
-    })
+    now.value.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
 );
 
-// --- HELPER: Image Optimization (HIGHER QUALITY) ---
+// --- HELPER: Image Optimization ---
 function getThumbnail(url) {
     if (!url) return '';
     if (url.includes('cloudinary.com') && url.includes('/upload/')) {
-        // Increased quality to w_500, q_auto:best
         return url.replace('/upload/', '/upload/w_500,h_500,c_fill,q_auto:best,f_auto/');
     }
     return url;
@@ -74,9 +54,7 @@ const filteredProducts = computed(() => {
     let products = [];
     if (menu.menuData) {
         if (activeCategory.value === 'All') {
-            Object.values(menu.menuData).forEach(items => {
-                if (Array.isArray(items)) products.push(...items);
-            });
+            Object.values(menu.menuData).forEach(items => { if (Array.isArray(items)) products.push(...items); });
         } else {
             products = menu.menuData[activeCategory.value] || [];
         }
@@ -88,7 +66,22 @@ const filteredProducts = computed(() => {
     });
 });
 
-// --- DUAL SCREEN LOGIC ---
+// --- NEW STATE: Tracks the last selected sugar level for each product ID
+const lastSelectedSugar = reactive({});
+
+// --- WRAPPER ACTION: Updates state and calls original handler
+function handleProductClickWrapper(product, sugarLevel) {
+    // 1. Update the state tracker
+    lastSelectedSugar[product.product_id] = sugarLevel;
+
+    // 2. Call your original business logic
+    // If the click came from the Plus button, pass null for default logic.
+    const finalSugar = sugarLevel === 'Default' ? null : sugarLevel;
+
+    handleProductClick(product, finalSugar);
+}
+
+// --- DUAL SCREEN SYNC ---
 watch(() => cart.cartItems, (newItems) => {
     if (!isPaymentMode.value) {
         sendToCustomer('UPDATE_CART', {
@@ -105,36 +98,34 @@ function openCustomerScreen() {
 // --- ACTIONS ---
 function handleLogout() { auth.logout(); }
 
-function handleProductClick(product) {
+// ✅ UPDATED: Direct Add (No Modal)
+function handleProductClick(product, sugarLevel = null) {
     if (isPaymentMode.value) return;
 
-    if (product.options && product.options.length > 0) {
-        selectedProduct.value = product;
-        Object.keys(currentOptions).forEach(key => delete currentOptions[key]);
-        product.options.forEach(opt => {
-            if (opt.values.length > 0) currentOptions[opt.name] = opt.values[0];
-        });
-        showOptionsModal.value = true;
-    } else {
-        cart.addItem(product);
-    }
-}
+    let optionsText = '';
 
-function confirmOptions() {
-    if (!selectedProduct.value) return;
-    const optionsText = Object.entries(currentOptions).map(([key, val]) => `${val}`).join(', ');
+    // 1. Handle "Sugar" overrides from the footer buttons
+    if (sugarLevel) {
+        optionsText = sugarLevel;
+    }
+    // 2. Handle existing backend options (Auto-select defaults if no specific sugar clicked)
+    else if (product.options && product.options.length > 0) {
+        // Map the first value of every option group as default (e.g. "Normal Ice, Normal Sugar")
+        optionsText = product.options.map(opt => opt.values[0]).join(', ');
+    }
+
     const productToAdd = {
-        ...selectedProduct.value,
-        product_id: `${selectedProduct.value.product_id}-${Date.now()}-${optionsText}`,
-        original_id: selectedProduct.value.product_id,
-        name: `${selectedProduct.value.name} (${optionsText})`,
-        price: selectedProduct.value.price,
-        image_url: selectedProduct.value.image_url,
-        category_name: selectedProduct.value.category_name
+        ...product,
+        // Create unique ID based on options so we can have "Latte" and "Latte (50% Sugar)" separate
+        product_id: `${product.product_id}-${Date.now()}-${optionsText}`,
+        original_id: product.product_id,
+        name: optionsText ? `${product.name} (${optionsText})` : product.name,
+        price: product.price,
+        image_url: product.image_url,
+        category_name: product.category_name
     };
+
     cart.addItem(productToAdd);
-    showOptionsModal.value = false;
-    selectedProduct.value = null;
 }
 
 function adjustQty(item, delta) {
@@ -160,20 +151,16 @@ async function handlePaymentSuccess() {
         lastOrder.value = {
             id: Math.floor(Math.random() * 90000) + 10000,
             items: JSON.parse(JSON.stringify(cart.cartItems)),
-            total: cart.totalPrice
+            total: cart.totalPrice,
         };
-
         await cart.submitOrder();
         sendToCustomer('PAYMENT_SUCCESS', {});
         isPaymentMode.value = false;
 
         if (enablePrint.value) {
             await nextTick();
-            setTimeout(() => {
-                window.print();
-            }, 100);
+            setTimeout(() => { window.print(); }, 100);
         }
-
     } catch (err) {
         alert("Error saving order: " + err.message);
     }
@@ -182,125 +169,145 @@ async function handlePaymentSuccess() {
 
 <template>
     <div
-        class="flex h-screen bg-[#FAFAFA] font-sans text-zinc-800 overflow-hidden selection:bg-red-800 selection:text-white touch-action-manipulation">
+        class="flex h-screen bg-[#F8F8F8] font-montserrat text-[#000000] overflow-hidden selection:bg-[#AA2B1D] selection:text-white">
 
         <ReceiptTemplate v-if="lastOrder" :orderId="lastOrder.id" :items="lastOrder.items" :total="lastOrder.total" />
 
-        <aside
-            class="hidden md:flex flex-col w-16 bg-white border-r border-zinc-100 h-full shrink-0 z-20 items-center py-4 gap-2">
-            <div class="mb-2">
-                <div class="w-10 h-10 bg-red-800 text-white flex items-center justify-center rounded-lg shadow-sm">
-                    <Coffee size="20" stroke-width="2.5" />
-                </div>
+        <aside class="hidden md:flex flex-col w-16 bg-[#000000] h-full shrink-0 z-20
+         items-center py-6 gap-6 rounded-r-3xl ">
+            <!-- Top -->
+            <div class="w-10 h-10 text-gray-400 flex items-center justify-center rounded-xl mb-4">
+                <Menu size="20" stroke-width="2.5" />
             </div>
 
-            <div class="flex-1 flex flex-col gap-2 w-full px-2">
-                <button @click="showSettingsModal = true"
-                    class="w-full aspect-square rounded-lg text-zinc-400 hover:bg-zinc-50 hover:text-red-800 transition-all flex items-center justify-center"
-                    title="Settings">
+            <!-- Bottom -->
+            <div class="mt-auto pb-4 flex flex-col items-center gap-12">
+
+                <button @click="openCustomerScreen" class="w-10 h-10 rounded-xl flex items-center justify-center
+             text-gray-400 cursor-pointer">
+                    <Monitor size="20" />
+                </button>
+
+                <button @click="showSettingsModal = true" class="w-10 h-10 rounded-xl flex items-center justify-center
+             text-gray-400 cursor-pointer">
                     <Settings size="20" />
                 </button>
-            </div>
 
-            <div class="mt-auto px-2 w-full">
-                <button @click="handleLogout"
-                    class="w-full aspect-square flex items-center justify-center rounded-lg text-zinc-300 hover:bg-red-50 hover:text-red-800 transition-colors"
-                    title="Logout">
+                <button @click="handleLogout" class="w-10 h-10 rounded-xl flex items-center justify-center
+             text-gray-400 hover:text-red-400 transition-colors">
                     <LogOut size="20" />
                 </button>
             </div>
         </aside>
 
-        <main class="flex-1 flex flex-col min-w-0 h-full relative"
+        <main class="flex-1 flex flex-col min-w-0 h-full relative px-4 py-6"
             :class="{ 'opacity-50 pointer-events-none grayscale': isPaymentMode }">
 
-            <header class="flex-none bg-white z-10 border-b border-zinc-100 shadow-[0_2px_10px_rgb(0,0,0,0.03)]">
-                <div class="flex flex-wrap md:flex-nowrap items-center gap-3 p-3 md:h-16 md:px-4">
-
-                    <!-- <div
-                        class="hidden xl:flex flex-col justify-center mr-2 border-r border-zinc-100 pr-4 h-8 shrink-0 md:order-1">
-                        <span class="text-sm font-black text-zinc-800 leading-none">{{ formattedTime }}</span>
-                        <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-wide leading-tight">{{
-                            formattedDate }}</span>
-                    </div> -->
-
-                    <div class="flex items-center gap-2 w-full md:w-auto md:shrink-0 order-1 md:order-2">
-                        <button @click="openCustomerScreen"
-                            class="flex items-center justify-center w-11 h-11 md:w-10 md:h-10 rounded-xl bg-zinc-50 text-zinc-500 border border-zinc-100 active:scale-95 transition-all hover:text-red-800 hover:border-red-200"
-                            title="Open Customer Screen">
-                            <Monitor size="20" stroke-width="2" />
-                        </button>
-
-                        <div class="relative flex-1 md:w-56 transition-all">
-                            <Search class="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" size="18" />
-                            <input v-model="searchQuery" type="text" placeholder="Search items..."
-                                class="w-full pl-10 pr-4 h-11 md:h-10 bg-zinc-50 border-none focus:bg-white focus:ring-2 focus:ring-red-800/20 rounded-xl text-sm font-medium focus:outline-none transition-all placeholder-zinc-400 text-zinc-900">
-                        </div>
+            <header class="flex items-center justify-between mb-6">
+                <div class="flex items-center gap-8 flex-1">
+                    <div>
+                        <h1 class="text-2xl font-preahvihear font-medium text-[#000000]">សាយ័ណ្ហកាហ្វេ</h1>
+                        <p class="text-xs font-medium text-gray-400 mt-1">{{ formattedTime }}</p>
                     </div>
 
-                    <div class="w-full md:flex-1 overflow-x-auto scrollbar-hide order-2 md:order-3 pb-1 md:pb-0">
-                        <div class="flex items-center gap-2">
-                            <button @click="activeCategory = 'All'"
-                                class="px-5 h-10 md:h-9 rounded-xl text-xs font-bold transition-all border whitespace-nowrap flex items-center shadow-sm"
-                                :class="activeCategory === 'All' ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300'">
-                                <div class="grid grid-cols-2 gap-0.5 mr-2 opacity-70">
-                                    <div class="w-1 h-1 rounded-full bg-current"></div>
-                                    <div class="w-1 h-1 rounded-full bg-current"></div>
-                                    <div class="w-1 h-1 rounded-full bg-current"></div>
-                                    <div class="w-1 h-1 rounded-full bg-current"></div>
-                                </div>
-                                All Items
-                            </button>
+                    <div class="relative w-full max-w-md hidden lg:block">
+                        <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size="18" />
+                        <input v-model="searchQuery" type="text" placeholder="Search menu..."
+                            class="w-full pl-11 pr-4 h-11 bg-white rounded-xl text-sm  focus:outline-none focus:ring-2 focus:ring-[#AA2B1D]/20  text-[#000000] placeholder-gray-300">
+                    </div>
+                </div>
 
-                            <button v-for="cat in menu.categories" :key="cat" @click="activeCategory = cat"
-                                class="px-5 h-10 md:h-9 rounded-xl text-sm font-bold transition-all border whitespace-nowrap flex items-center shadow-sm"
-                                :class="activeCategory === cat ? 'bg-red-800 text-white border-red-800' : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300'">
-                                <Coffee v-if="cat.includes('Coffee')" size="14" class="mr-1.5 opacity-80" />
-                                {{ cat }}
-                            </button>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-3 ml-2 bg-white pl-2 pr-4 py-1.5 rounded-full ">
+                        <div class="w-8 h-8 rounded-full bg-[#000000] text-white flex items-center justify-center">
+                            <User size="14" />
+                        </div>
+                        <div class="hidden lg:block text-left">
+                            <p class="text-xs font-medium text-[#000000]">{{ auth.userName }}</p>
+                            <p class="text-[10px] text-gray-400">Staff</p>
                         </div>
                     </div>
-
                 </div>
             </header>
 
-            <div class="flex-1 overflow-y-auto px-4 py-4 pb-32 sm:pb-4 custom-scrollbar bg-[#FAFAFA]">
+            <div class="flex items-center gap-3 mb-6 overflow-x-auto scrollbar-hide pb-2">
+                <button @click="activeCategory = 'All'"
+                    class="px-6 py-2.5 rounded-full text-sm font-medium transition-all whitespace-nowrap"
+                    :class="activeCategory === 'All' ? 'bg-[#000000] text-white ' : 'bg-white text-gray-400 hover:text-[#000000]'">
+                    All Items
+                </button>
+
+                <button v-for="cat in menu.categories" :key="cat" @click="activeCategory = cat"
+                    class="px-6 py-2.5 rounded-full text-sm font-medium transition-all whitespace-nowrap"
+                    :class="activeCategory === cat ? 'bg-[#000000] text-white ' : 'bg-white text-gray-400 hover:text-[#000000]'">
+                    <Coffee v-if="cat.includes('Coffee')" size="14" class="mr-2 inline-block opacity-70" />
+                    {{ cat }}
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto pr-2 pb-20 scrollbar-hide">
                 <div v-if="menu.isLoading" class="flex flex-col items-center justify-center h-64 gap-3">
-                    <Loader2 class="animate-spin w-6 h-6 text-red-800" />
-                    <p class="tex-xs font-bold text-zinc-400 uppercase tracking-widest">Loading...</p>
+                    <Loader2 class="animate-spin w-8 h-8 text-[#AA2B1D]" />
+                    <p class="text-sm font-medium text-gray-400">Loading Menu...</p>
                 </div>
 
                 <div v-else-if="filteredProducts.length === 0"
-                    class="flex flex-col items-center justify-center h-64 text-zinc-300">
-                    <Coffee size="48" class="mb-3 opacity-20" />
-                    <p class="text-xs font-bold">No items found.</p>
+                    class="flex flex-col items-center justify-center h-64 text-gray-400">
+                    <Coffee size="48" class="mb-4 opacity-20" />
+                    <p class="font-medium">No items found.</p>
                 </div>
 
-                <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                <div v-else class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                     <div v-for="product in filteredProducts" :key="product.product_id"
-                        @click="handleProductClick(product)"
-                        class="group cursor-pointer bg-white rounded-xl p-2 shadow-sm border border-zinc-100 hover:border-red-800 hover:shadow-md transition-all duration-200 flex flex-col gap-2">
-                        <div class="aspect-4/3 bg-zinc-50 rounded-lg overflow-hidden relative">
+                        class="bg-white rounded-xl shadow-md p-4 transition-all duration-300 group flex flex-col relative border border-transparent hover:border-[#AA2B1D]/20">
+                        <div class="w-full aspect-square rounded-2xl overflow-hidden relative mb-3">
                             <img v-if="product.image_url" :src="getThumbnail(product.image_url)"
-                                class="w-full h-full object-cover transition-transform duration-500" loading="lazy" />
-                            <div v-else class="w-full h-full flex items-center justify-center text-zinc-200">
-                                <Coffee size="24" />
+                                class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                loading="lazy" />
+                            <div v-else class="w-full h-full flex items-center justify-center text-gray-300">
+                                <Coffee size="32" />
                             </div>
-                            <!-- <div v-if="product.options && product.options.length" class="absolute top-1.5 left-1.5 bg-black/60 backdrop-blur text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">
-                            OPT
-                        </div> -->
+
+                            <div @click.stop="handleProductClick(product)"
+                                class="absolute top-2 right-2 w-8 h-8 rounded-full bg-[#AA2B1D] text-white flex items-center justify-center cursor-pointer transform transition-transform group-hover:scale-110 active:scale-95">
+                                <Plus size="16" stroke-width="3" />
+                            </div>
                         </div>
 
-                        <div class="px-1 pb-1">
-                            <h3 class="font-medium text-sm text-black leading-tight mb-1 truncate">{{ product.name }}
-                            </h3>
-                            <div class="flex items-center justify-between">
-                                <span class="text-sm font-black text-red-800">${{ Number(product.price).toFixed(2)
+                        <div class="flex flex-col flex-1">
+                            <div class="flex justify-between items-start mb-1 gap-2">
+                                <h3 class="font-medium text-[#000000] text-xs leading-tight line-clamp-2">{{
+                                    product.name }}</h3>
+                                <span class="font-medium text-[#000000] text-[10px] whitespace-nowrap">${{ product.price
                                     }}</span>
-                                <div
-                                    class="w-6 h-6 rounded bg-zinc-50 text-zinc-300 group-hover:bg-red-800 group-hover:text-white flex items-center justify-center transition-colors">
-                                    <Plus size="14" stroke-width="3" />
-                                </div>
+                            </div>
+
+                            <p class="text-[10px] text-gray-400 mb-3 font-semibold tracking-wide">
+                                Sugar Level
+                            </p>
+
+                            <div class="mt-auto flex justify-between items-center bg-zinc-50 rounded-xl p-1 gap-1">
+
+                                <button @click.stop="handleProductClickWrapper(product, '0% Sugar')" :class="{
+                                    'bg-red-800 text-white rounded-full': lastSelectedSugar[product.product_id] === '0% Sugar',
+                                    'text-gray-500 hover:bg-[#AA2B1D] hover:text-white': lastSelectedSugar[product.product_id] !== '0% Sugar'
+                                }" class="flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors">
+                                    0%
+                                </button>
+
+                                <button @click.stop="handleProductClickWrapper(product, '50% Sugar')" :class="{
+                                    'bg-red-800 text-white rounded-full': lastSelectedSugar[product.product_id] === '50% Sugar',
+                                    'text-gray-500 hover:bg-[#AA2B1D] hover:text-white': lastSelectedSugar[product.product_id] !== '50% Sugar'
+                                }" class="flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors">
+                                    50%
+                                </button>
+
+                                <button @click.stop="handleProductClickWrapper(product, '100% Sugar')" :class="{
+                                    'bg-red-800 text-white rounded-full': lastSelectedSugar[product.product_id] === '100% Sugar',
+                                    'text-gray-500 hover:bg-[#AA2B1D] hover:text-white': lastSelectedSugar[product.product_id] !== '100% Sugar'
+                                }" class="flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors">
+                                    100%
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -309,184 +316,116 @@ async function handlePaymentSuccess() {
         </main>
 
         <aside
-            class="fixed inset-y-0 right-0 w-full md:w-sm bg-white shadow-xl z-30 flex flex-col md:relative md:translate-y-0 border-l border-zinc-100 transition-transform duration-300"
+            class="fixed inset-y-0 right-0 w-full md:w-sm bg-white z-30 flex flex-col md:relative md:translate-y-0 transition-transform duration-300   md:border-l md:border-gray-100 px-6 py-6"
             :class="showMobileCart ? 'translate-y-0' : 'translate-y-full md:translate-y-0'">
-            <div class="h-14 px-5 border-b border-zinc-50 flex items-center justify-between shrink-0 bg-white">
-                <img src="/logo.svg" alt="Logo" class="h-8 w-auto object-contain" />
 
-                <div class="flex items-center gap-3">
-                    <div class="flex flex-col items-end">
-                        <span class="text-xs text-zinc-900 leading-none">{{ formattedTime }}</span>
-                        <span class="text-[10px] text-zinc-400 tracking-wide">{{ formattedDate
-                            }}</span>
-                    </div>
-
-                    <button @click="showMobileCart = false" class="md:hidden p-1 bg-zinc-50 rounded-full">
-                        <X size="18" />
-                    </button>
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h2 class="text-xl font-medium text-[#000000] mb-1">Current Order</h2>
+                    <p class="text-xs text-gray-400 font-kantumruy">ការបញ្ជាទិញបច្ចុប្បន្ន</p>
                 </div>
+                <button @click="cart.clearCart()"
+                    class="text-xs font-medium text-gray-300 hover:text-red-500 transition-colors uppercase tracking-wide">Clear</button>
+                <button @click="showMobileCart = false" class="md:hidden p-2 bg-gray-100 rounded-full">
+                    <X size="20" />
+                </button>
             </div>
 
-            <div class="px-5 py-3 bg-zinc-50/30 border-b border-zinc-50 flex justify-between items-center">
-                <h2 class="text-xs font-bold text-zinc-500 uppercase tracking-wide">Current Order</h2>
-                <span class="text-xs font-bold text-red-800 bg-red-50 px-2 py-0.5 rounded-full">{{ cart.cartItems.length
-                    }} Items</span>
-            </div>
-
-            <div class="flex-1 overflow-y-auto px-5 py-2" ref="cartListRef">
+            <div class="flex-1 overflow-y-auto pr-1" ref="cartListRef">
                 <div v-if="cart.cartItems.length === 0"
-                    class="h-40 flex flex-col items-center justify-center text-zinc-300 gap-2 border-2 border-dashed border-zinc-50 rounded-xl mt-4">
-                    <ShoppingBag size="24" stroke-width="1.5" />
-                    <p class="text-xs font-medium">Empty Cart</p>
+                    class="h-40 flex flex-col items-center justify-center text-gray-300 gap-2 border-2 border-dashed border-gray-100 rounded-xl">
+                    <ShoppingBag size="32" class="opacity-20" />
+                    <p class="text-xs font-medium">Cart Empty</p>
                 </div>
 
                 <div v-for="item in cart.cartItems" :key="item.product_id"
-                    class="flex items-start gap-3 py-3 border-b border-zinc-50 group"
-                    :class="{ 'opacity-60 grayscale': isPaymentMode }">
-                    <div class="w-10 h-10 bg-zinc-50 rounded-md shrink-0 overflow-hidden border border-zinc-100">
+                    class="flex items-center gap-4 py-4 border-b border-gray-50 last:border-0 group">
+                    <div
+                        class="w-12 aspect-square rounded-xl overflow-hidden shrink-0 border border-gray-100 bg-gray-50">
                         <img v-if="item.image_url" :src="getThumbnail(item.image_url)"
                             class="w-full h-full object-cover" />
                     </div>
 
-                    <div class="flex-1 min-w-0 pt-0.5">
-                        <p class="font-medium text-sm text-zinc-800 leading-snug truncate">{{ item.name }}</p>
-                        <p class="tex-xs font-medium text-zinc-400">${{ item.price }}</p>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-sm text-[#000000] truncate">{{ item.name }}</p>
+                        <p class="text-xs text-gray-400 font-medium mt-1">${{ item.price }}</p>
                     </div>
 
-                    <div class="flex flex-col items-end gap-1">
-                        <p class="font-black text-xs text-zinc-900">${{ (parseFloat(item.price) *
-                            item.quantity).toFixed(2) }}</p>
-
-                        <div v-if="!isPaymentMode" class="flex items-center gap-1 bg-zinc-50 rounded p-0.5">
-                            <button @click="adjustQty(item, -1)"
-                                class="w-8 h-6 rounded bg-white shadow-sm flex items-center justify-center text-zinc-500 hover:text-red-600 transition-colors">
-                                <Minus size="12" v-if="item.quantity > 1" />
-                                <Trash2 size="12" class="text-red-500" v-else />
-                            </button>
-
-                            <span class="text-xs font-bold w-8 text-center">{{ item.quantity }}</span>
-
-                            <button @click="adjustQty(item, 1)"
-                                class="w-8 h-6 rounded bg-white shadow-sm flex items-center justify-center text-zinc-500 hover:text-blue-600 transition-colors">
-                                <Plus size="12" />
-                            </button>
-                        </div>
-                        <span v-else class="tex-xs font-bold text-zinc-500 bg-zinc-100 px-1.5 rounded">x{{
-                            item.quantity }}</span>
+                    <div v-if="!isPaymentMode" class="flex items-center gap-3">
+                        <button @click="adjustQty(item, -1)"
+                            class="w-7 h-7 rounded-full border border-gray-200 text-[#000000] flex items-center justify-center hover:bg-[#AA2B1D] hover:text-white hover:border-[#AA2B1D] transition-all">
+                            <Minus size="12" stroke-width="3" />
+                        </button>
+                        <span class="font-medium text-[#000000] w-4 text-center text-sm">{{ item.quantity }}</span>
+                        <button @click="adjustQty(item, 1)"
+                            class="w-7 h-7 rounded-full border border-gray-200 text-[#000000] flex items-center justify-center hover:bg-[#AA2B1D] hover:text-white hover:border-[#AA2B1D] transition-all">
+                            <Plus size="12" stroke-width="3" />
+                        </button>
                     </div>
+                    <div v-else class="font-medium text-[#000000]">x{{ item.quantity }}</div>
                 </div>
             </div>
 
-            <div class="p-5 bg-white z-10 border-t border-zinc-100 shadow-[0_-4px_20px_rgb(0,0,0,0.02)]">
-
-                <div v-if="!isPaymentMode" class="space-y-4">
-                    <div class="flex justify-between items-end">
-                        <span class="text-xs text-zinc-400 font-bold uppercase">Total</span>
-                        <span class="text-xl font-black text-zinc-900">${{ cart.totalPrice }}</span>
+            <div class="mt-auto pt-6 border-t border-dashed border-gray-200">
+                <div class="space-y-3 mb-6">
+                    <div class="flex justify-between items-center text-[#000000] text-sm font-medium">
+                        <span>Subtotal</span>
+                        <span>${{ cart.totalPrice }}</span>
                     </div>
+                    <div class="flex justify-between items-center text-gray-400 text-sm ">
+                        <span>Tax / Fees</span>
+                        <span>$0.00</span>
+                    </div>
+                    <div class="border-t border-dashed border-gray-200 my-2"></div>
+                    <div class="flex justify-between items-center text-[#000000] text-xl font-medium">
+                        <span>Total</span>
+                        <span>${{ cart.totalPrice }}</span>
+                    </div>
+                </div>
 
+                <div v-if="!isPaymentMode">
                     <button @click="handleCheckoutStart" :disabled="cart.cartItems.length === 0"
-                        class="w-full bg-red-800 text-white h-12 rounded-lg text-sm font-bold shadow-lg shadow-red-900/10 hover:bg-red-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] uppercase tracking-wide">
-                        Check out
+                        class="w-full bg-[#000000] text-white h-14 rounded-xl text-sm font-medium hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                        <Printer size="18" /> Print Bills
                     </button>
                 </div>
 
-                <div v-else class="space-y-3">
-                    <div class="bg-red-50 p-4 rounded-lg flex items-center justify-between border border-red-100">
-                        <div>
-                            <p class="tex-xs font-bold uppercase text-red-800 tracking-wider">Payable</p>
-                            <p class="text-2xl font-black text-zinc-900">${{ cart.totalPrice }}</p>
-                        </div>
-                        <Loader2 class="animate-spin text-red-800" size="18" />
-                    </div>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button @click="handleUpdateOrder"
-                            class="py-3 rounded-lg font-bold text-xs uppercase border border-zinc-200 text-zinc-600 hover:bg-zinc-50 transition-colors">Modify</button>
-                        <button @click="handlePaymentSuccess"
-                            class="py-3 bg-green-600 text-white rounded-lg font-bold text-xs uppercase shadow-md hover:bg-green-700 transition-all active:scale-[0.98]">
-                            Confirm
-                        </button>
-                    </div>
+                <div v-else class="grid grid-cols-2 gap-3">
+                    <button @click="handleUpdateOrder"
+                        class="py-3 rounded-xl font-medium text-sm border border-gray-200 text-gray-500 hover:bg-gray-50">Back</button>
+                    <button @click="handlePaymentSuccess"
+                        class="py-3 bg-[#AA2B1D] text-white rounded-xl font-medium text-sm  hover:bg-[#d67a28]">Confirm</button>
                 </div>
             </div>
         </aside>
 
-        <div v-if="!showMobileCart && cart.cartItems.length > 0"
-            class="md:hidden fixed bottom-0 left-0 right-0 p-4 z-40 bg-white/80 backdrop-blur-md border-t border-zinc-200">
+        <div v-if="!showMobileCart && cart.cartItems.length > 0" class="md:hidden fixed bottom-6 left-6 right-6 z-40">
             <button @click="showMobileCart = true"
-                class="w-full bg-zinc-900 text-white h-14 rounded-2xl flex items-center justify-between px-5 shadow-xl shadow-zinc-900/20 active:scale-[0.98] transition-transform">
-                <div class="flex items-center gap-3">
-                    <div class="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold">
-                        {{ cart.cartItems.length }}
-                    </div>
-                    <div class="flex flex-col items-start">
-                        <span class="text-xs font-medium text-zinc-300">Total</span>
-                        <span class="text-sm font-bold leading-none">View Order</span>
-                    </div>
-                </div>
-                <span class="font-black text-xl">${{ cart.totalPrice }}</span>
+                class="w-full bg-[#000000] text-white h-14 rounded-2xl flex items-center justify-between px-6 ">
+                <span class="font-medium">{{ cart.cartItems.length }} items</span>
+                <span class="font-medium text-lg">${{ cart.totalPrice }}</span>
             </button>
         </div>
 
-        <div v-if="showOptionsModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div class="absolute inset-0 bg-zinc-900/40 backdrop-blur-sm transition-opacity"
-                @click="showOptionsModal = false"></div>
-            <div
-                class="relative w-full max-w-sm bg-white rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-                <div class="flex items-start gap-3 mb-5">
-                    <div class="w-16 h-16 bg-zinc-50 rounded-lg overflow-hidden shrink-0"><img
-                            v-if="selectedProduct?.image_url" :src="getThumbnail(selectedProduct.image_url)"
-                            class="w-full h-full object-cover" /></div>
-                    <div>
-                        <h3 class="font-black text-lg text-zinc-900 leading-tight">{{ selectedProduct?.name }}</h3>
-                        <p class="text-sm font-bold text-red-800 mt-0.5">${{ selectedProduct?.price }}</p>
-                    </div>
-                </div>
-                <div class="space-y-4 mb-6">
-                    <div v-for="optionGroup in selectedProduct?.options" :key="optionGroup.name">
-                        <p class="tex-xs font-bold uppercase text-zinc-400 mb-2">{{ optionGroup.name }}</p>
-                        <div class="flex flex-wrap gap-2">
-                            <button v-for="val in optionGroup.values" :key="val"
-                                @click="currentOptions[optionGroup.name] = val"
-                                class="px-3 py-1.5 rounded-md text-xs font-bold transition-all border"
-                                :class="currentOptions[optionGroup.name] === val ? 'bg-red-800 text-white border-red-800' : 'bg-white text-zinc-500 border-zinc-200 hover:border-red-200'">{{
-                                    val }}</button>
-                        </div>
-                    </div>
-                </div>
-                <button @click="confirmOptions"
-                    class="w-full py-3 rounded-lg bg-red-800 text-white text-sm font-bold uppercase hover:bg-red-900 shadow-md transition-all">Add
-                    to Cart</button>
-            </div>
-        </div>
-
         <div v-if="showSettingsModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div class="absolute inset-0 bg-zinc-900/40 backdrop-blur-sm transition-opacity"
-                @click="showSettingsModal = false"></div>
-            <div
-                class="relative w-full max-w-xs bg-white rounded-2xl p-5 shadow-2xl animate-in zoom-in-95 duration-200">
-                <div class="flex items-center justify-between mb-5">
-                    <h3 class="font-bold text-lg text-zinc-900 flex items-center gap-2">Settings</h3>
-                    <button @click="showSettingsModal = false" class="p-1.5 bg-zinc-50 rounded-full hover:bg-zinc-100">
-                        <X size="16" class="text-zinc-500" />
+            <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showSettingsModal = false"></div>
+            <div class="relative w-full max-w-sm bg-white rounded-3xl p-6 ">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="font-medium text-xl text-[#000000]">Settings</h3>
+                    <button @click="showSettingsModal = false">
+                        <X class="text-gray-400" />
                     </button>
                 </div>
-                <div class="space-y-3">
-                    <div @click="enablePrint = !enablePrint"
-                        class="flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all select-none"
-                        :class="enablePrint ? 'border-red-200 bg-red-50/50' : 'border-zinc-100 hover:bg-zinc-50'">
-                        <div class="flex items-center gap-3">
-                            <div class="p-2 rounded-lg"
-                                :class="enablePrint ? 'bg-red-800 text-white' : 'bg-zinc-100 text-zinc-400'">
-                                <Printer size="18" />
-                            </div>
-                            <span class="text-sm font-bold text-zinc-900">Auto-Print</span>
-                        </div>
-                        <div class="w-10 h-6 rounded-full relative transition-colors duration-200"
-                            :class="enablePrint ? 'bg-red-800' : 'bg-zinc-200'">
-                            <div class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 shadow-sm"
-                                :class="enablePrint ? 'translate-x-4' : 'translate-x-0'"></div>
-                        </div>
+                <div @click="enablePrint = !enablePrint"
+                    class="flex items-center justify-between p-4 rounded-2xl border cursor-pointer"
+                    :class="enablePrint ? 'border-[#AA2B1D] bg-[#AA2B1D]/10' : 'border-gray-100'">
+                    <div class="flex items-center gap-3">
+                        <Printer :class="enablePrint ? 'text-[#AA2B1D]' : 'text-gray-400'" />
+                        <span class="font-medium text-[#000000]">Auto-Print Receipt</span>
+                    </div>
+                    <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center"
+                        :class="enablePrint ? 'border-[#AA2B1D] bg-[#AA2B1D]' : 'border-gray-300'">
+                        <Check v-if="enablePrint" size="14" class="text-white" />
                     </div>
                 </div>
             </div>
@@ -496,8 +435,10 @@ async function handlePaymentSuccess() {
 </template>
 
 <style>
-.touch-action-manipulation {
-    touch-action: manipulation;
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+.font-montserrat {
+    font-family: 'Montserrat', sans-serif;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -509,7 +450,7 @@ async function handlePaymentSuccess() {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: #e2e8f0;
+    background-color: #e5e7eb;
     border-radius: 20px;
 }
 
