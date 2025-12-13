@@ -1,115 +1,152 @@
+<script setup>
+import { computed } from 'vue';
+
+const props = defineProps({
+  orderId: [String, Number],
+  items: {
+    type: Array,
+    default: () => []
+  },
+  total: [Number, String],
+  timestamp: {
+    type: Date,
+    default: () => new Date()
+  }
+});
+
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2
+  }).format(Number(value));
+};
+
+const parseItem = (fullName) => {
+  const match = fullName.match(/^(.*?)\s*\((.*)\)$/);
+  if (match) {
+    return { name: match[1], options: match[2] };
+  }
+  return { name: fullName, options: null };
+};
+
+const formattedDate = computed(() => props.timestamp.toLocaleDateString('en-GB'));
+const formattedTime = computed(() => props.timestamp.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' }));
+</script>
+
 <template>
   <div id="receipt-print-area" class="hidden-print-layout">
     <div class="receipt-content">
-      <div class="text-center mb-4">
-        <h2 class="font-black text-xl uppercase">Sayon Coffee</h2>
-        <p class="text-xs">St. 230, Phnom Penh</p>
-        <p class="text-xs">Tel: 012-345-678</p>
+      
+      <div class="text-center mb-2">
+        <h2 class="font-black text-base uppercase mb-0.5">Sayon Coffee</h2>
+        <p class="text-[9px] text-black leading-tight">St. 230, Phnom Penh</p>
+        <p class="text-[9px] text-black leading-tight">Tel: 012-345-678</p>
       </div>
 
-      <div class="border-b border-dashed border-black my-2"></div>
-
-      <div class="flex justify-between text-xs mb-2">
-        <span>Date: {{ new Date().toLocaleDateString() }}</span>
-        <span>Time: {{ new Date().toLocaleTimeString() }}</span>
+      <div class="dashed-line"></div>
+      
+      <div class="flex justify-between text-[9px] font-mono my-1">
+        <span>{{ formattedDate }}</span>
+        <span>{{ formattedTime }}</span>
       </div>
-      <div class="text-xs mb-2">Order ID: #{{ orderId }}</div>
+      <div class="text-[9px] font-mono mb-1">Ref: #{{ orderId }}</div>
 
-      <div class="border-b border-dashed border-black my-2"></div>
+      <div class="dashed-line"></div>
 
-      <table class="w-full text-xs text-left">
+      <table class="w-full text-[10px] text-left mt-1 mb-1 table-fixed">
         <thead>
-          <tr>
-            <th class="pb-1">Item</th>
-            <th class="pb-1 text-center">Qty</th>
-            <th class="pb-1 text-right">Price</th>
+          <tr class="font-bold border-b border-black">
+            <th class="w-[55%] pb-1">Item</th>
+            <th class="w-[15%] pb-1 text-center">Qty</th>
+            <th class="w-[30%] pb-1 text-right">Amt</th>
           </tr>
         </thead>
-        <tbody>
-          <tr v-for="(item, i) in items" :key="i">
-            <td class="py-1">
-                {{ item.name }}
-                <div v-if="item.name.includes('(')" class="text-[10px] text-gray-500 pl-1">
-                   {{ item.name.split('(')[1].replace(')', '') }}
-                </div>
+        <tbody class="font-mono">
+          <tr v-for="(item, i) in items" :key="i" class="align-top">
+            <td class="pt-1 pr-1">
+              <div class="font-bold leading-tight">{{ parseItem(item.name).name }}</div>
+              <div v-if="parseItem(item.name).options" class="text-[8px] text-gray-600 leading-tight mt-0.5">
+                - {{ parseItem(item.name).options }}
+              </div>
             </td>
-            <td class="py-1 text-center">{{ item.quantity }}</td>
-            <td class="py-1 text-right">${{ (Number(item.price) * item.quantity).toFixed(2) }}</td>
+            <td class="pt-1 text-center align-top">{{ item.quantity }}</td>
+            <td class="pt-1 text-right align-top">
+              {{ formatCurrency(Number(item.price) * item.quantity) }}
+            </td>
           </tr>
         </tbody>
       </table>
 
-      <div class="border-b border-dashed border-black my-2"></div>
+      <div class="dashed-line"></div>
 
-      <div class="flex justify-between font-bold text-sm mt-2">
+      <div class="flex justify-between items-center font-black text-sm mt-1">
         <span>TOTAL</span>
-        <span>${{ Number(total).toFixed(2) }}</span>
+        <span>{{ formatCurrency(total) }}</span>
       </div>
       
-      <div class="text-center text-[10px] mt-6">
-        <p>Thank you for supporting local!</p>
-        <p>Wi-Fi: Sayon_Guest / Pass: coffee123</p>
+      <div class="text-center text-[9px] mt-4 font-mono leading-relaxed">
+        <p>THANK YOU!</p>
+        <p class="mt-0.5">Wi-Fi: Sayon_Guest</p>
       </div>
+
+      <div class="h-4"></div>
     </div>
   </div>
 </template>
 
-<script setup>
-defineProps({
-  orderId: [String, Number],
-  items: Array,
-  total: [Number, String]
-});
-</script>
-
 <style>
-/* ⚠️ IMPORTANT: NO 'scoped' here! We need global print rules. */
+.dashed-line {
+  border-bottom: 1px dashed black;
+  width: 100%;
+  margin: 2px 0;
+}
 
 @media print {
-  /* 1. Hide EVERYTHING on the page */
+  /* 1. Reset Page for 58mm Thermal Paper */
+  @page {
+    margin: 0;
+    size: 58mm auto; /* Critical for Chrome/Edge to detect paper size */
+  }
+
   body * {
     visibility: hidden;
   }
 
-  /* 2. Lock the page size so it doesn't try to scroll */
   html, body {
-    height: 100vh;
-    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    width: 100%;
   }
 
-  /* 3. Make only the receipt visible */
   #receipt-print-area, 
   #receipt-print-area * {
     visibility: visible !important;
   }
 
-  /* 4. Position the receipt at the very top-left of the paper */
   #receipt-print-area {
     position: absolute;
     left: 0;
     top: 0;
-    width: 100%; /* Let printer driver decide width (58mm) */
-    margin: 0;
-    padding: 0;
     
-    /* Optional: Ensure font is dark black for thermal paper */
-    color: black;
-    font-family: 'Courier New', Courier, monospace; 
-  }
+    /* 2. Set Width to match printable area of 58mm paper (~48mm) */
+    width: 48mm; 
+    
+    /* Center it slightly if your printer prints left-aligned */
+    margin-left: 1mm; 
 
-  /* 5. Clear browser margins */
-  @page {
-    size: auto;
-    margin: 0;
+    /* 3. Typography Adjustments */
+    color: black !important;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 10px; /* Base font size */
+    line-height: 1.1;
   }
 }
 
-/* On normal screen, keep the receipt hidden */
 .hidden-print-layout {
   display: none;
 }
 
-/* On print screen, show it */
 @media print {
   .hidden-print-layout {
     display: block !important;

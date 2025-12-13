@@ -24,7 +24,7 @@ const searchQuery = ref('');
 const activeCategory = ref('All');
 const isPaymentMode = ref(false);
 const showSettingsModal = ref(false);
-const enablePrint = ref(true);
+const enablePrint = ref(false);
 const lastOrder = ref(null);
 const now = ref(new Date());
 
@@ -98,7 +98,6 @@ function openCustomerScreen() {
 // --- ACTIONS ---
 function handleLogout() { auth.logout(); }
 
-// ✅ UPDATED: Direct Add (No Modal)
 function handleProductClick(product, sugarLevel = null) {
     if (isPaymentMode.value) return;
 
@@ -108,16 +107,22 @@ function handleProductClick(product, sugarLevel = null) {
     if (sugarLevel) {
         optionsText = sugarLevel;
     }
-    // 2. Handle existing backend options (Auto-select defaults if no specific sugar clicked)
+    // 2. Handle existing backend options
     else if (product.options && product.options.length > 0) {
-        // Map the first value of every option group as default (e.g. "Normal Ice, Normal Sugar")
         optionsText = product.options.map(opt => opt.values[0]).join(', ');
     }
 
+    // --- FIX START ---
+    // We create a "Signature ID" based only on the ID + Options. 
+    // We remove Date.now() so identical items generate the identical ID.
+    const uniqueId = optionsText
+        ? `${product.product_id}-${optionsText}`
+        : `${product.product_id}`;
+    // --- FIX END ---
+
     const productToAdd = {
         ...product,
-        // Create unique ID based on options so we can have "Latte" and "Latte (50% Sugar)" separate
-        product_id: `${product.product_id}-${Date.now()}-${optionsText}`,
+        product_id: uniqueId, // Use the stable ID
         original_id: product.product_id,
         name: optionsText ? `${product.name} (${optionsText})` : product.name,
         price: product.price,
@@ -206,14 +211,14 @@ async function handlePaymentSuccess() {
             <header class="flex items-center justify-between mb-6">
                 <div class="flex items-center gap-8 flex-1">
                     <div>
-                        <h1 class="text-2xl font-preahvihear font-medium text-[#000000]">សាយ័ណ្ហកាហ្វេ</h1>
+                        <h1 class="text-xl md:text-2xl font-preahvihear font-medium text-[#000000]">សាយ័ណ្ហកាហ្វេ</h1>
                         <p class="text-xs font-medium text-gray-400 mt-1">{{ formattedTime }}</p>
                     </div>
 
                     <div class="relative w-full max-w-md hidden lg:block">
                         <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size="18" />
                         <input v-model="searchQuery" type="text" placeholder="Search menu..."
-                            class="w-full pl-11 pr-4 h-11 bg-white rounded-xl text-sm  focus:outline-none focus:ring-2 focus:ring-[#AA2B1D]/20  text-[#000000] placeholder-gray-300">
+                            class="w-full pl-11 pr-4 h-11 bg-white rounded-xl text-sm  focus:outline-none text-[#000000] placeholder-gray-300">
                     </div>
                 </div>
 
@@ -232,13 +237,13 @@ async function handlePaymentSuccess() {
 
             <div class="flex items-center gap-3 mb-6 overflow-x-auto scrollbar-hide pb-2">
                 <button @click="activeCategory = 'All'"
-                    class="px-6 py-2.5 rounded-full text-sm font-medium transition-all whitespace-nowrap"
+                    class="px-6 py-2.5 rounded-full text-xs font-medium transition-all whitespace-nowrap"
                     :class="activeCategory === 'All' ? 'bg-[#000000] text-white ' : 'bg-white text-gray-400 hover:text-[#000000]'">
                     All Items
                 </button>
 
                 <button v-for="cat in menu.categories" :key="cat" @click="activeCategory = cat"
-                    class="px-6 py-2.5 rounded-full text-sm font-medium transition-all whitespace-nowrap"
+                    class="px-6 py-2.5 rounded-full text-xs font-medium transition-all whitespace-nowrap"
                     :class="activeCategory === cat ? 'bg-[#000000] text-white ' : 'bg-white text-gray-400 hover:text-[#000000]'">
                     <Coffee v-if="cat.includes('Coffee')" size="14" class="mr-2 inline-block opacity-70" />
                     {{ cat }}
@@ -268,10 +273,10 @@ async function handlePaymentSuccess() {
                                 <Coffee size="32" />
                             </div>
 
-                            <div @click.stop="handleProductClick(product)"
+                            <!-- <div @click.stop="handleProductClick(product)"
                                 class="absolute top-2 right-2 w-8 h-8 rounded-full bg-[#AA2B1D] text-white flex items-center justify-center cursor-pointer transform transition-transform group-hover:scale-110 active:scale-95">
                                 <Plus size="16" stroke-width="3" />
-                            </div>
+                            </div> -->
                         </div>
 
                         <div class="flex flex-col flex-1">
@@ -340,11 +345,11 @@ async function handlePaymentSuccess() {
 
                 <div v-for="item in cart.cartItems" :key="item.product_id"
                     class="flex items-center gap-4 py-4 border-b border-gray-50 last:border-0 group">
-                    <div
+                    <!-- <div
                         class="w-12 aspect-square rounded-xl overflow-hidden shrink-0 border border-gray-100 bg-gray-50">
                         <img v-if="item.image_url" :src="getThumbnail(item.image_url)"
                             class="w-full h-full object-cover" />
-                    </div>
+                    </div> -->
 
                     <div class="flex-1 min-w-0">
                         <p class="font-medium text-sm text-[#000000] truncate">{{ item.name }}</p>
@@ -386,7 +391,10 @@ async function handlePaymentSuccess() {
                 <div v-if="!isPaymentMode">
                     <button @click="handleCheckoutStart" :disabled="cart.cartItems.length === 0"
                         class="w-full bg-[#000000] text-white h-14 rounded-xl text-sm font-medium hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                        <Printer size="18" /> Print Bills
+
+                        <Printer v-if="enablePrint" size="18" />
+
+                        {{ enablePrint ? 'Print Bills' : 'Checkout' }}
                     </button>
                 </div>
 

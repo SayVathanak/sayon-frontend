@@ -1,446 +1,549 @@
 <script setup>
 import { onMounted, reactive, ref, computed, watch } from 'vue';
 import { useAuthStore } from '../stores/auth';
-import { useProductStore } from '../stores/products';
 import { useBranchStore } from '../stores/branches';
 import apiClient from '../services/api';
 import CategoryManager from '../components/admin/CategoryManager.vue';
-import ProductManager from '@/components/admin/ProductManager.vue';
+import ProductManager from '../components/admin/ProductManager.vue';
 import { useRouter } from 'vue-router';
-import { useAutoAnimate } from '@formkit/auto-animate/vue';
-import Swal from 'sweetalert2';
-import { toast } from 'vue-sonner';
 import {
-    LayoutDashboard, ShoppingBag, Store, LogOut, Plus, Edit, Trash2, X, Layers,
-    Search, MapPin, Loader2, ListPlus, UploadCloud, TrendingUp, Users, Wallet, Menu, Coffee,
-    Calendar, Filter
+    LayoutDashboard, ShoppingBag, Store, LogOut, Menu, Layers,
+    TrendingUp, DollarSign, ShoppingCart, Calendar, Filter, ChevronRight, Plus, Trash2
 } from 'lucide-vue-next';
 
 const auth = useAuthStore();
-const products = useProductStore();
 const branchStore = useBranchStore();
 const router = useRouter();
 
-// Optimization: Only animate specific lists
-const [salesTableRef] = useAutoAnimate();
+// --- CONFIG ---
+const menuItems = [
+    { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
+    { id: 'category', icon: Layers, label: 'Categories' },
+    { id: 'products', icon: ShoppingBag, label: 'Inventory' },
+    { id: 'settings', icon: Store, label: 'Branches' }
+];
 
 // --- STATE ---
 const activeTab = ref('dashboard');
-const searchQuery = ref('');
-const showProductModal = ref(false);
-const isMobileMenuOpen = ref(false); // 👈 NEW: Controls mobile sidebar
+const isMobileMenuOpen = ref(false);
+const sidebarCollapsed = ref(false);
 
-// Stats Data
-const stats = reactive({ totalSales: 0, totalOrders: 0, topProduct: 'Loading...' });
-const branchStats = ref([]);
-
-// Sales Report State
-const reportPeriod = ref('today'); 
+// Analytics
+const reportPeriod = ref('today');
 const reportBranch = ref('all');
+const customStartDate = ref(new Date().toISOString().split('T')[0]);
+const customEndDate = ref(new Date().toISOString().split('T')[0]);
 const salesReport = ref([]);
+const branchStats = ref([]);
+const stats = reactive({ totalSales: 0, totalOrders: 0 });
 const isReportLoading = ref(false);
 
-// Product Form State (Kept same as before)
-const isEditing = ref(false);
-const editingId = ref(null);
-const isUploading = ref(false);
-const productForm = reactive({
-    category_id: 1, name: '', price: 0.00, is_available: true,
-    image_url: '', options: []
-});
-const newOptionName = ref('');
-const newOptionValues = ref('');
+// Branch Management
 const newBranch = reactive({ username: '', password: '', name: '' });
 
-// --- WATCHERS ---
-watch([reportPeriod, reportBranch], () => {
-    fetchSalesReport();
+// --- COMPUTED ---
+const averageOrderValue = computed(() => {
+    return stats.totalOrders > 0 ? (stats.totalSales / stats.totalOrders).toFixed(2) : '0.00';
 });
 
-// Watch route/tab changes to close mobile menu automatically
+// Smart Revenue Display: Switches between Global Total and Branch Specific Total
+const displayedRevenue = computed(() => {
+    // 1. If "All Branches" is selected, use the global stats
+    if (reportBranch.value === 'all') {
+        return stats.totalSales;
+    }
+    // 2. If a specific branch is selected, try to get the number from the Branch Stats
+    if (branchStats.value.length > 0) {
+        return branchStats.value.reduce((sum, b) => sum + Number(b.total_revenue || 0), 0);
+    }
+    // 3. Fallback
+    return stats.totalSales;
+});
+
+const periodLabel = computed(() => {
+    // Make sure the closing brace '}' is AFTER 'Custom Range'
+    const labels = { 
+        today: 'Today', 
+        week: 'This Week', 
+        month: 'This Month',
+        custom: 'Custom Range' 
+    }; 
+    return labels[reportPeriod.value] || 'Today';
+});
+
+// --- WATCHERS ---
+watch([reportPeriod, reportBranch, customStartDate, customEndDate], () => {
+    // If custom is selected but dates are empty, don't fetch yet
+    if (reportPeriod.value === 'custom' && (!customStartDate.value || !customEndDate.value)) {
+        return;
+    }
+    fetchStats();
+    fetchSalesReport();
+    fetchBranchPerformance();
+});
+
 watch(activeTab, () => {
     isMobileMenuOpen.value = false;
 });
 
-// --- HELPER FUNCTIONS ---
-function getThumbnail(url) {
-    if (!url) return '';
-    if (url.includes('cloudinary.com') && url.includes('/upload/')) {
-        return url.replace('/upload/', '/upload/w_200,h_200,c_fill,q_auto,f_auto/');
-    }
-    return url;
-}
-
 // --- LIFECYCLE ---
 onMounted(() => {
     if (auth.user?.role !== 'admin' && !auth.user) {
-        // logic
+        router.push({ name: 'login' });
+        return;
     }
-    products.fetchAllProducts();
     branchStore.fetchBranches();
     fetchStats();
     fetchSalesReport();
+    fetchBranchPerformance();
 });
 
-// --- API ACTIONS (Kept same as before) ---
-async function fetchSalesReport() {
-    isReportLoading.value = true; // Turn on loading state
-    // 💡 TRICK: Do NOT clear salesReport.value here. 
-    // We keep showing the old data (blurred) until the new data arrives.
-    
-    try {
-        const res = await apiClient.get('/stats/sales-report', {
-            params: {
-                period: reportPeriod.value,
-                branch_id: reportBranch.value
-            }
-        });
-        salesReport.value = res.data; // Swap data instantly when ready
-    } catch (err) {
-        console.error("Report error:", err);
-    } finally {
-        isReportLoading.value = false; // Turn off loading
+// New helper to generate params for all 3 API calls
+function getApiParams() {
+    const params = {
+        period: reportPeriod.value,
+        branch_id: reportBranch.value
+    };
+
+    // If custom, attach specific dates
+    if (reportPeriod.value === 'custom') {
+        params.start_date = customStartDate.value;
+        params.end_date = customEndDate.value;
     }
+
+    return params;
 }
 
+// --- API ACTIONS ---
 async function fetchStats() {
     try {
-        const res = await apiClient.get('/stats');
+        const res = await apiClient.get('/stats', { params: getApiParams() });
         Object.assign(stats, res.data);
     } catch (err) { console.error(err); }
 }
 
-// --- FORM ACTIONS ---
-function openAddModal() { resetForm(); showProductModal.value = true; }
-function startEdit(product) {
-    Object.assign(productForm, product);
-    productForm.options = product.options || [];
-    productForm.image_url = product.image_url || '';
-    isEditing.value = true; editingId.value = product.product_id; showProductModal.value = true;
-}
-function resetForm() {
-    Object.assign(productForm, { category_id: 1, name: '', price: 0.00, is_available: true, image_url: '', options: [] });
-    newOptionName.value = ''; newOptionValues.value = ''; isEditing.value = false; editingId.value = null;
-}
-function addOptionGroup() {
-    if (!newOptionName.value || !newOptionValues.value) return;
-    productForm.options.push({ name: newOptionName.value, values: newOptionValues.value.split(',').map(v => v.trim()).filter(v => v) });
-    newOptionName.value = ''; newOptionValues.value = '';
-}
-function removeOptionGroup(index) { productForm.options.splice(index, 1); }
-
-async function handleFileUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    isUploading.value = true;
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', 'ml_default'); 
+async function fetchSalesReport() {
+    isReportLoading.value = true;
     try {
-        const res = await fetch(`https://api.cloudinary.com/v1_1/YOUR_CLOUD_NAME/image/upload`, {
-            method: 'POST', body: formData
-        });
-        const data = await res.json();
-        productForm.image_url = data.secure_url;
-    } catch (err) { console.error('Upload failed', err); } 
-    finally { isUploading.value = false; }
-}
-
-async function handleSubmit() {
-    try {
-        if (isEditing.value) {
-            await products.updateProduct(editingId.value, productForm);
-            toast.success('Product updated successfully!'); // 👈 Nice green popup
-        } else {
-            await products.addProduct(productForm);
-            toast.success('New product added to menu!'); // 👈 Nice green popup
-        }
-        
-        showProductModal.value = false; 
-        resetForm();
+        const res = await apiClient.get('/stats/sales-report', { params: getApiParams() });
+        salesReport.value = res.data;
     } catch (err) {
-        // 👈 Nice red popup for errors
-        toast.error('Failed to save product. ' + err.message);
+        console.error("Report error:", err);
+    } finally {
+        isReportLoading.value = false;
     }
+}
+
+async function fetchBranchPerformance() {
+    try {
+        const res = await apiClient.get('/stats/branches', { params: getApiParams() });
+        branchStats.value = res.data;
+    } catch (err) { console.error(err); }
 }
 
 async function handleCreateBranch() {
     if (!newBranch.username || !newBranch.password || !newBranch.name) return alert("Fill all fields.");
-    try { await branchStore.addBranch(newBranch); Object.assign(newBranch, { username: '', password: '', name: '' }); } catch (err) { alert(err.message); }
+    try {
+        await branchStore.addBranch(newBranch);
+        Object.assign(newBranch, { username: '', password: '', name: '' });
+    } catch (err) {
+        alert(err.message);
+    }
 }
-function handleLogout() { auth.logout(); router.push({ name: 'login' }); }
+
+function handleLogout() {
+    auth.logout();
+    router.push({ name: 'login' });
+}
 </script>
 
 <template>
-    <div class="flex flex-col md:flex-row h-screen bg-[#F8F9FD] font-sans text-slate-800 overflow-hidden antialiased selection:bg-blue-100 selection:text-blue-900">
+    <div
+        class="flex h-screen bg-[#FAFAFA] text-slate-900 font-sans overflow-hidden selection:bg-[#AA2B1D] selection:text-white">
 
-        <div class="md:hidden flex items-center justify-between p-4 bg-white border-b border-slate-100 shrink-0 z-30">
-            <h1 class="text-xl font-black tracking-tight text-slate-900 flex items-center gap-2">
-                <div class="w-7 h-7 rounded-lg bg-blue-600"></div> Sayon.
-            </h1>
-            <button @click="isMobileMenuOpen = true" class="p-2 text-slate-500 hover:bg-slate-50 rounded-lg">
-                <Menu size="24" />
+        <div
+            class="md:hidden fixed top-0 w-full bg-white border-b border-gray-100 z-30 px-4 py-3 flex justify-between items-center">
+            <h1 class="font-medium text-xl tracking-tight font-preahvihear">សាយ័ណ្ហកាហ្វេ</h1>
+            <button @click="isMobileMenuOpen = true" class="p-2 text-gray-600 active:bg-gray-100 rounded-lg">
+                <Menu size="20" />
             </button>
         </div>
 
-        <div v-if="isMobileMenuOpen" 
-             @click="isMobileMenuOpen = false"
-             class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 md:hidden animate-in fade-in duration-200">
-        </div>
+        <div v-if="isMobileMenuOpen" @click="isMobileMenuOpen = false"
+            class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 md:hidden animate-in fade-in"></div>
 
         <aside :class="[
-            'flex flex-col w-72 bg-white border-r border-slate-100 h-full shrink-0 z-50 shadow-[4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300',
-            'fixed top-0 left-0 bottom-0 md:relative', // Positioning
-            isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0' // Slide logic
+            'bg-white border-r border-gray-100 flex flex-col z-50 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)]',
+            'fixed top-0 bottom-0 left-0 h-full md:relative shadow-xl md:shadow-none',
+            isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+            sidebarCollapsed ? 'w-64 md:w-20' : 'w-64'
         ]">
-            <div class="p-8 pb-4 flex justify-between items-start">
-                <div>
-                    <h1 class="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2">
-                        <div class="w-8 h-8 rounded-lg bg-blue-600"></div> Sayon<span class="text-slate-300">.</span>
-                    </h1>
-                    <p class="text-xs font-bold text-slate-400 mt-2 uppercase tracking-widest pl-1">Admin Console</p>
+            <div class="h-20 flex items-center justify-between px-6 border-b border-gray-50/50">
+                <div v-if="!sidebarCollapsed" class="flex flex-col animate-in fade-in duration-300 origin-left">
+                    <span class="font-medium text-xl leading-none font-preahvihear text-slate-800">សាយ័ណ្ហ<span
+                            class="text-[#AA2B1D]">កាហ្វេ</span></span>
+                    <span class="text-[10px] font-semibold text-gray-400 uppercase tracking-[0.2em] mt-1.5">Admin
+                        Console</span>
                 </div>
-                <button @click="isMobileMenuOpen = false" class="md:hidden text-slate-400 hover:text-red-500">
-                    <X size="24" />
+
+                <div v-else class="w-full flex justify-center">
+                    <div
+                        class="w-10 h-10 bg-[#AA2B1D] rounded-xl flex items-center justify-center text-white shadow-lg ">
+                        <span class="font-preahvihear text-lg">ស</span>
+                    </div>
+                </div>
+
+                <button @click="sidebarCollapsed = !sidebarCollapsed"
+                    class="hidden md:flex text-gray-400 hover:text-slate-800 transition-colors absolute -right-3 top-8 bg-white border border-gray-100 rounded-full p-1 shadow-sm z-50">
+                    <ChevronRight size="14" :class="{ 'rotate-180': !sidebarCollapsed }"
+                        class="transition-transform duration-300" />
                 </button>
             </div>
 
-            <nav class="flex-1 px-4 space-y-2 mt-4 overflow-y-auto">
-                <button @click="activeTab = 'dashboard'"
-                    :class="activeTab === 'dashboard' ? 'bg-blue-50 text-blue-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'"
-                    class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold transition-all">
-                    <LayoutDashboard size="20" /> Dashboard
-                </button>
+            <nav class="flex-1 px-3 py-6 space-y-1.5 overflow-y-auto scrollbar-hide">
+                <template v-for="item in menuItems" :key="item.id">
+                    <button @click="activeTab = item.id" :class="[
+                        'w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all duration-200 group relative',
+                        activeTab === item.id
+                            ? 'bg-[#AA2B1D] text-white shadow-lg '
+                            : 'text-slate-500 hover:bg-gray-50 hover:text-slate-900',
+                        sidebarCollapsed ? 'justify-center' : ''
+                    ]">
+                        <component :is="item.icon" :size="20" :stroke-width="2"
+                            :class="activeTab === item.id ? 'text-white' : 'text-slate-400 group-hover:text-slate-700'" />
+                        <span v-if="!sidebarCollapsed" class="animate-in fade-in duration-200">{{ item.label }}</span>
 
-                <button @click="activeTab = 'category'"
-                    :class="activeTab === 'category' ? 'bg-blue-50 text-blue-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'"
-                    class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold transition-all">
-                    <Layers size="20" /> Categories
-                </button>
-
-                <button @click="activeTab = 'products'"
-                    :class="activeTab === 'products' ? 'bg-blue-50 text-blue-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'"
-                    class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold transition-all">
-                    <ShoppingBag size="20" /> Products
-                </button>
-
-                <button @click="activeTab = 'settings'"
-                    :class="activeTab === 'settings' ? 'bg-blue-50 text-blue-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'"
-                    class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold transition-all">
-                    <Store size="20" /> Branches
-                </button>
+                        <div v-if="sidebarCollapsed"
+                            class="absolute left-full ml-4 bg-slate-800 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 pointer-events-none whitespace-nowrap z-50 shadow-xl">
+                            {{ item.label }}
+                            <div
+                                class="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 border-4 border-transparent border-r-slate-800">
+                            </div>
+                        </div>
+                    </button>
+                </template>
             </nav>
 
-            <div class="p-6 border-t border-slate-50">
-                <div class="flex items-center gap-3 mb-6 p-3 bg-slate-50 rounded-2xl">
-                    <div class="w-10 h-10 rounded-xl bg-white text-blue-600 shadow-sm flex items-center justify-center font-black text-lg">
-                        {{ auth.userName?.charAt(0) || 'A' }}</div>
-                    <div>
-                        <p class="text-sm font-bold text-slate-900">{{ auth.userName || 'Admin' }}</p>
-                        <p class="text-[10px] text-slate-400 font-bold uppercase">Super User</p>
+            <div class="p-4 border-t border-gray-50">
+                <div v-if="!sidebarCollapsed"
+                    class="bg-gray-50 rounded-xl p-3 mb-3 flex items-center gap-3 border border-gray-100">
+                    <div
+                        class="w-9 h-9 rounded-full bg-white border border-gray-200 text-[#AA2B1D] flex items-center justify-center font-medium text-sm shadow-sm">
+                        {{ auth.userName?.charAt(0).toUpperCase() || 'A' }}
+                    </div>
+                    <div class="overflow-hidden flex-1">
+                        <p class="text-sm font-semibold text-slate-800 truncate">{{ auth.userName || 'Admin' }}</p>
+                        <p class="text-[10px] text-gray-500 font-medium">Super User</p>
                     </div>
                 </div>
+
                 <button @click="handleLogout"
-                    class="w-full flex items-center justify-center gap-2 text-slate-400 hover:text-red-500 text-xs font-bold uppercase tracking-widest transition-colors py-2">
-                    <LogOut size="16" /> Sign Out
+                    :class="['w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-500 hover:bg-red-50 hover:text-[#AA2B1D] transition-colors text-sm font-medium group', sidebarCollapsed ? 'justify-center' : '']">
+                    <LogOut size="20" class="group-hover:stroke-[#AA2B1D] transition-colors" />
+                    <span v-if="!sidebarCollapsed">Sign Out</span>
                 </button>
             </div>
         </aside>
 
-        <main class="flex-1 overflow-y-auto p-4 md:p-10 relative pb-24 md:pb-10 w-full">
+        <main class="flex-1 flex flex-col h-full overflow-hidden relative w-full">
+            <div class="flex-1 overflow-y-auto p-4 md:p-8 pt-20 md:pt-8 space-y-6 scrollbar-hide">
 
-            <div v-show="activeTab === 'dashboard'">
-                <div class="bg-white p-6 md:p-8 rounded-3xl md:rounded-4xl shadow-sm border border-slate-100 mt-4 md:mt-8">
-                    
-                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                        
+                <div v-if="activeTab === 'dashboard'"
+                    class="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+
+                    <div class="flex flex-col xl:flex-row justify-between items-end xl:items-center gap-4">
                         <div>
-                            <h3 class="font-bold text-lg text-slate-900 flex items-center gap-2">
-                                <ListPlus class="text-blue-600" size="20" /> Detailed Sales Report
-                            </h3>
-                            <p class="text-sm text-slate-400 font-medium">Breakdown of items sold by period.</p>
+                            <h2 class="text-2xl font-medium text-slate-900">Dashboard</h2>
+                            <p class="text-gray-500 text-sm mt-1">
+                                Overview for <span class="font-medium text-[#AA2B1D] capitalize">{{ periodLabel
+                                    }}</span>
+                            </p>
                         </div>
 
-                        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-slate-50 p-2 rounded-2xl w-full md:w-auto">
-                            
-                            <div class="relative flex-1">
-                                <Calendar class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="14" />
-                                <select v-model="reportPeriod"
-                                    class="w-full pl-9 pr-4 py-2 bg-white rounded-xl text-xs font-bold text-slate-700 outline-none border border-slate-200 shadow-sm focus:border-blue-500 appearance-none cursor-pointer hover:border-blue-300 transition-colors">
-                                    <option value="today">Today</option>
-                                    <option value="week">This Week</option>
-                                    <option value="month">This Month</option>
-                                </select>
+                        <div class="flex flex-col sm:flex-row gap-3 items-end sm:items-center">
+
+                            <div v-if="reportPeriod === 'custom'"
+                                class="flex bg-white rounded-xl border border-gray-200 p-1 shadow-sm animate-in fade-in slide-in-from-right-4 duration-300">
+                                <input type="date" v-model="customStartDate"
+                                    class="text-xs font-semibold bg-transparent outline-none px-3 py-2 cursor-pointer hover:bg-gray-50 rounded-lg text-slate-700 transition-colors border-none" />
+                                <span class="flex items-center text-gray-400 px-1">to</span>
+                                <input type="date" v-model="customEndDate"
+                                    class="text-xs font-semibold bg-transparent outline-none px-3 py-2 cursor-pointer hover:bg-gray-50 rounded-lg text-slate-700 transition-colors border-none" />
                             </div>
 
-                            <div class="relative flex-1">
-                                <Filter class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="14" />
-                                <select v-model="reportBranch"
-                                    class="w-full pl-9 pr-4 py-2 bg-white rounded-xl text-xs font-bold text-slate-700 outline-none border border-slate-200 shadow-sm focus:border-blue-500 appearance-none cursor-pointer hover:border-blue-300 transition-colors">
-                                    <option value="all">All Branches</option>
-                                    <option v-for="branch in branchStore.branchList" :key="branch.user_id" :value="branch.user_id">
-                                        {{ branch.name }}
-                                    </option>
-                                </select>
+                            <div class="flex bg-white rounded-xl border border-gray-200 p-1 gap-1 shadow-sm">
+                                <div class="relative">
+                                    <select v-model="reportPeriod"
+                                        class="text-xs font-semibold bg-transparent outline-none pl-3 pr-8 py-2 cursor-pointer hover:bg-gray-50 rounded-lg text-slate-700 appearance-none transition-colors">
+                                        <option value="today">Today</option>
+                                        <option value="week">This Week</option>
+                                        <option value="month">This Month</option>
+                                        <option value="custom">Custom Range</option>
+                                    </select>
+                                    <Calendar
+                                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                                        size="12" />
+                                </div>
+                                <div class="w-px bg-gray-200 my-1"></div>
+                                <div class="relative">
+                                    <select v-model="reportBranch"
+                                        class="text-xs font-semibold bg-transparent outline-none pl-3 pr-8 py-2 cursor-pointer hover:bg-gray-50 rounded-lg text-slate-700 appearance-none transition-colors">
+                                        <option value="all">All Branches</option>
+                                        <option v-for="b in branchStore.branchList" :key="b.user_id" :value="b.user_id">
+                                            {{
+                                            b.name }}
+                                        </option>
+                                    </select>
+                                    <Filter
+                                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                                        size="12" />
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="relative overflow-hidden rounded-2xl border border-slate-100 min-h-[300px]">
-                        
-                        <div v-if="isReportLoading" 
-                             class="absolute inset-0 z-10 flex items-center justify-center bg-white/60 backdrop-blur-[2px] transition-all duration-300">
-                             <div class="bg-white p-3 rounded-2xl shadow-lg border border-slate-100 flex items-center gap-3">
-                                <Loader2 class="animate-spin text-blue-600" size="20" />
-                                <span class="text-xs font-bold text-slate-500">Updating...</span>
-                             </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div
+                            class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between group h-32 hover:shadow-md transition-shadow">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-[10px] font-medium text-gray-400 uppercase tracking-widest">Revenue
+                                    </p>
+                                    <h3 class="text-3xl font-medium mt-2 text-slate-900 tracking-tight">${{
+                                        Number(displayedRevenue).toFixed(2) }}</h3>
+                                </div>
+                                <div
+                                    class="p-2.5 bg-[#AA2B1D]/10 text-[#AA2B1D] rounded-xl group-hover:bg-[#AA2B1D] group-hover:text-white transition-colors">
+                                    <DollarSign size="20" />
+                                </div>
+                            </div>
+                            <div class="w-full h-1.5 bg-gray-100 rounded-full mt-auto overflow-hidden">
+                                <div class="h-full bg-[#AA2B1D] rounded-full" style="width: 100%"></div>
+                            </div>
                         </div>
 
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left min-w-[500px]">
-                                <thead class="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
-                                    <tr>
-                                        <th class="p-4">Item Name</th>
-                                        <th class="p-4 text-center">Qty Sold</th>
-                                        <th class="p-4 text-right">Revenue Generated</th>
-                                    </tr>
-                                </thead>
-                                
-                                <tbody :class="{ 'opacity-40': isReportLoading }" class="text-sm divide-y divide-slate-50 transition-opacity duration-300">
-                                    
-                                    <tr v-if="!isReportLoading && salesReport.length === 0">
-                                        <td colspan="3" class="p-12 text-center text-slate-400 font-medium">
-                                            <div class="flex flex-col items-center gap-2">
-                                                <div class="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-2">
-                                                    <ShoppingBag class="text-slate-300" size="24" />
+                        <div
+                            class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between group h-32 hover:shadow-md transition-shadow">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-[10px] font-medium text-gray-400 uppercase tracking-widest">Total
+                                        Orders</p>
+                                    <h3 class="text-3xl font-medium mt-2 text-slate-900 tracking-tight">{{
+                                        stats.totalOrders }}
+                                    </h3>
+                                </div>
+                                <div
+                                    class="p-2.5 bg-blue-50 text-blue-600 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                    <ShoppingCart size="20" />
+                                </div>
+                            </div>
+                            <div class="mt-auto text-xs text-gray-400 flex items-center gap-1">
+                                Completed transactions
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between group h-32 hover:shadow-md transition-shadow">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-[10px] font-medium text-gray-400 uppercase tracking-widest">Avg.
+                                        Order Value
+                                    </p>
+                                    <h3 class="text-3xl font-medium mt-2 text-slate-900 tracking-tight">${{
+                                        averageOrderValue }}
+                                    </h3>
+                                </div>
+                                <div
+                                    class="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                                    <TrendingUp size="20" />
+                                </div>
+                            </div>
+                            <div class="mt-auto text-xs text-gray-400">
+                                Per customer average
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full min-h-0">
+
+                        <div
+                            class="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[500px]">
+                            <div class="p-5 border-b border-gray-50 flex justify-between items-center bg-white z-10">
+                                <div>
+                                    <h3 class="font-medium text-slate-800">Sale Report</h3>
+                                    <p class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Manifest for
+                                        Period</p>
+                                </div>
+                                <span v-if="isReportLoading"
+                                    class="text-xs text-[#AA2B1D] font-medium animate-pulse">Syncing...</span>
+                            </div>
+
+                            <div class="overflow-y-auto flex-1 p-0 scrollbar-thin scrollbar-thumb-gray-200">
+                                <table class="w-full text-sm text-left whitespace-nowrap">
+                                    <thead
+                                        class="bg-gray-50/50 text-gray-400 font-medium text-[10px] uppercase tracking-wider border-b border-gray-100 sticky top-0 z-10 backdrop-blur-sm">
+                                        <tr>
+                                            <th class="px-6 py-4 bg-gray-50/95">Item Name</th>
+                                            <th class="px-6 py-4 text-center bg-gray-50/95">Qty</th>
+                                            <th class="px-6 py-4 text-right bg-gray-50/95">Revenue</th>
+                                            <th class="px-6 py-4 text-right w-24 bg-gray-50/95">Contrib.</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-50">
+                                        <tr v-if="salesReport.length === 0" class="text-center text-gray-400">
+                                            <td colspan="4" class="p-12">No sales data found.</td>
+                                        </tr>
+                                        <tr v-else v-for="(item, idx) in salesReport" :key="idx"
+                                            class="group hover:bg-gray-50/50 transition-colors">
+                                            <td class="px-6 py-3 font-medium text-slate-800">{{ item.product_name }}
+                                            </td>
+                                            <td class="px-6 py-3 text-center">
+                                                <span
+                                                    class="bg-gray-100 text-gray-600 px-2 py-1 rounded-md text-xs font-medium">{{
+                                                        item.total_quantity }}</span>
+                                            </td>
+                                            <td class="px-6 py-3 text-right font-medium text-slate-600">${{
+                                                Number(item.total_revenue).toFixed(2) }}</td>
+                                            <td class="px-6 py-3 text-right">
+                                                <div
+                                                    class="w-16 ml-auto h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-[#AA2B1D]"
+                                                        :style="{ width: `${displayedRevenue > 0 ? (item.total_revenue / displayedRevenue) * 100 : 0}%` }">
+                                                    </div>
                                                 </div>
-                                                No sales found for this period.
-                                            </div>
-                                        </td>
-                                    </tr>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
 
-                                    <tr v-else v-for="(item, idx) in salesReport" :key="idx"
-                                        class="group hover:bg-blue-50/30 transition-colors">
-                                        <td class="p-4 font-bold text-slate-700">
-                                            {{ item.product_name }}
-                                        </td>
-                                        <td class="p-4 text-center">
-                                            <span class="bg-slate-100 text-slate-600 px-2 py-1 rounded-lg text-xs font-bold">
-                                                {{ item.total_quantity }}
-                                            </span>
-                                        </td>
-                                        <td class="p-4 text-right font-mono font-bold text-slate-900">
-                                            ${{ Number(item.total_revenue).toFixed(2) }}
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <KeepAlive>
-                <div v-if="activeTab === 'category'">
-                    <CategoryManager />
-                </div>
-            </KeepAlive>
-
-            <KeepAlive>
-                <div v-if="activeTab === 'products'">
-                    <ProductManager />
-                </div>
-            </KeepAlive>
-
-            <div v-if="activeTab === 'settings'"
-                class="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h2 class="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Branch Management</h2>
-                <div class="bg-white p-6 md:p-8 rounded-4xl shadow-sm border border-slate-100">
-                    <h3 class="text-xs font-bold uppercase tracking-widest text-slate-400 mb-6">Add New Location</h3>
-                    <form @submit.prevent="handleCreateBranch" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                        <div class="space-y-2"><label class="text-xs font-bold text-slate-700">Branch ID</label><input
-                                v-model="newBranch.username" type="text"
-                                class="w-full bg-slate-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none"
-                                placeholder="st_230" /></div>
-                        <div class="space-y-2"><label class="text-xs font-bold text-slate-700">Password</label><input
-                                v-model="newBranch.password" type="text"
-                                class="w-full bg-slate-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none"
-                                placeholder="******" /></div>
-                        <button type="submit"
-                            class="bg-slate-900 text-white px-6 py-3 rounded-2xl text-sm font-bold hover:bg-slate-800 transition-colors shadow-lg h-[46px] w-full md:w-auto">Create
-                            Branch</button>
-                    </form>
-                </div>
-                <div class="grid gap-4">
-                    <div v-for="branch in branchStore.branchList" :key="branch.user_id"
-                        class="flex flex-col sm:flex-row items-start sm:items-center justify-between p-6 bg-white border border-slate-100 rounded-3xl md:rounded-4xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] gap-4">
-                        <div class="flex items-center gap-4">
                             <div
-                                class="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-black text-lg shrink-0">
-                                {{ branch.name.charAt(0) }}</div>
-                            <div>
-                                <p class="font-bold text-slate-900 text-lg">{{ branch.name }}</p>
-                                <p class="text-xs font-mono text-slate-400 bg-slate-50 px-2 py-1 rounded inline-block mt-1">
-                                    ID: {{ branch.username }}</p>
+                                class="p-4 bg-gray-50 border-t border-gray-100 flex justify-end items-center gap-4 z-20">
+                                <div class="text-right">
+                                    <p class="text-[10px] font-medium text-gray-400 uppercase tracking-widest">
+                                        {{ reportBranch === 'all' ? 'Total Period Revenue' : 'Branch Total' }}
+                                    </p>
+                                    <div class="flex items-baseline justify-end gap-1">
+                                        <span class="text-sm font-medium text-gray-500">USD</span>
+                                        <span class="text-3xl font-medium text-slate-900 tracking-tight">
+                                            ${{ Number(displayedRevenue).toFixed(2) }}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <button v-if="branch.role !== 'admin'" @click="branchStore.deleteBranch(branch.user_id)"
-                            class="p-3 bg-slate-50 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-xl transition-colors self-end sm:self-center">
-                            <Trash2 size="18" />
-                        </button>
+
+                        <div
+                            class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[500px]">
+                            <div class="p-5 border-b border-gray-50">
+                                <h3 class="font-medium text-slate-800">
+                                    {{ reportBranch === 'all' ? 'Branch Performance' : 'Branch Summary' }}
+                                </h3>
+                                <p class="text-xs text-gray-400 mt-1">
+                                    {{ reportBranch === 'all' ? 'Revenue Ranking' : 'Selected Location Data' }}
+                                </p>
+                            </div>
+
+                            <div class="divide-y divide-gray-50 overflow-y-auto">
+                                <div v-if="branchStats.length === 0" class="p-8 text-center text-gray-400 text-sm">
+                                    No active branches found.
+                                </div>
+
+                                <div v-else v-for="(branch, index) in branchStats" :key="index"
+                                    class="p-4 flex items-center justify-between group hover:bg-gray-50 transition-colors">
+                                    <div class="flex items-center gap-3">
+                                        <div
+                                            :class="['w-8 h-8 rounded-full flex items-center justify-center font-medium text-xs',
+                                                index === 0 ? 'bg-yellow-100 text-yellow-700' :
+                                                    index === 1 ? 'bg-gray-100 text-gray-600' :
+                                                        index === 2 ? 'bg-orange-50 text-orange-700' : 'bg-white text-gray-400 border border-gray-100']">
+                                            #{{ index + 1 }}
+                                        </div>
+                                        <div>
+                                            <p class="font-medium text-slate-800 text-sm">{{ branch.branch_name }}</p>
+                                            <p class="text-[10px] text-gray-400">{{ branch.total_orders }} orders</p>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="font-medium text-[#AA2B1D] text-sm">${{
+                                            Number(branch.total_revenue).toFixed(2) }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
+                <KeepAlive>
+                    <div v-if="activeTab === 'category'">
+                        <CategoryManager />
+                    </div>
+                </KeepAlive>
+
+                <KeepAlive>
+                    <div v-if="activeTab === 'products'">
+                        <ProductManager />
+                    </div>
+                </KeepAlive>
+
+                <div v-if="activeTab === 'settings'"
+                    class="mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                            <h2 class="text-2xl font-medium text-slate-900">Branch Management</h2>
+                            <p class="text-gray-400 text-sm mt-1">Manage access for your POS locations.</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-black text-white p-6 rounded-2xl shadow-lg shadow-black/10">
+                        <h3 class="text-xs font-medium uppercase tracking-widest text-gray-400 mb-4">Register New Branch
+                        </h3>
+                        <form @submit.prevent="handleCreateBranch"
+                            class="flex flex-col md:flex-row gap-4 items-start md:items-end">
+                            <div class="w-full">
+                                <label class="text-xs font-medium text-gray-400 mb-2 block">Branch Name</label>
+                                <input v-model="newBranch.name" type="text" placeholder="e.g. Riverside"
+                                    class="w-full bg-white/10 border border-white/10 px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#AA2B1D] outline-none transition-all text-white placeholder-gray-500" />
+                            </div>
+                            <div class="w-full">
+                                <label class="text-xs font-medium text-gray-400 mb-2 block">Login ID</label>
+                                <input v-model="newBranch.username" type="text" placeholder="user_01"
+                                    class="w-full bg-white/10 border border-white/10 px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#AA2B1D] outline-none transition-all text-white placeholder-gray-500" />
+                            </div>
+                            <div class="w-full">
+                                <label class="text-xs font-medium text-gray-400 mb-2 block">Password</label>
+                                <input v-model="newBranch.password" type="text" placeholder="******"
+                                    class="w-full bg-white/10 border border-white/10 px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#AA2B1D] outline-none transition-all text-white placeholder-gray-500" />
+                            </div>
+                            <button type="submit"
+                                class="w-full md:w-auto px-6 py-2.5 bg-[#AA2B1D] hover:bg-[#922216] text-white rounded-xl text-sm font-medium transition-colors whitespace-nowrap flex items-center justify-center gap-2">
+                                <Plus size="16" /> Add
+                            </button>
+                        </form>
+                    </div>
+
+                    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        <div v-for="branch in branchStore.branchList" :key="branch.user_id"
+                            class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between group hover:border-gray-200 transition-colors">
+                            <div class="flex items-center gap-4">
+                                <div
+                                    class="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center font-black text-xl text-gray-300 group-hover:bg-[#AA2B1D] group-hover:text-white transition-colors">
+                                    {{ branch.name.charAt(0) }}
+                                </div>
+                                <div>
+                                    <h4 class="font-medium text-slate-900 leading-tight">{{ branch.name }}</h4>
+                                    <p class="text-xs text-gray-400 mt-1">ID: {{ branch.username }}</p>
+                                </div>
+                            </div>
+                            <button v-if="branch.role !== 'admin'" @click="branchStore.deleteBranch(branch.user_id)"
+                                class="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                                <Trash2 size="18" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </main>
-
-        <div v-if="showProductModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-             <div class="absolute inset-0 bg-slate-900/20 backdrop-blur-sm" @click="showProductModal = false"></div>
-            <div class="relative w-full max-w-lg bg-white rounded-4xl p-6 md:p-8 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-                <h3 class="font-black text-2xl text-slate-900 mb-6">{{ isEditing ? 'Edit Product' : 'New Product' }}</h3>
-                <form @submit.prevent="handleSubmit" class="space-y-6">
-                    <div class="flex flex-col sm:flex-row gap-6">
-                        <div class="w-full sm:w-24 h-24 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex items-center justify-center relative overflow-hidden shrink-0 hover:border-blue-500 transition-colors cursor-pointer group">
-                            <img v-if="productForm.image_url" :src="getThumbnail(productForm.image_url)" class="w-full h-full object-cover" />
-                            <UploadCloud v-else size="24" class="text-slate-300 group-hover:text-blue-500" />
-                            <input type="file" @change="handleFileUpload" class="absolute inset-0 opacity-0 cursor-pointer" />
-                            <div v-if="isUploading" class="absolute inset-0 bg-white/80 flex items-center justify-center">
-                                <Loader2 class="animate-spin text-blue-600" />
-                            </div>
-                        </div>
-                        <div class="flex-1 space-y-4">
-                            <input v-model="productForm.name" class="w-full border-b-2 border-slate-100 py-2 text-lg font-bold placeholder-slate-300 focus:border-blue-600 outline-none bg-transparent transition-colors" placeholder="Product Name" required />
-                            <div class="flex gap-4">
-                                <input v-model.number="productForm.price" type="number" step="0.01" class="w-full border-b-2 border-slate-100 py-2 font-bold focus:border-blue-600 outline-none bg-transparent" placeholder="0.00" required />
-                                <select v-model.number="productForm.category_id" class="w-full border-b-2 border-slate-100 py-2 font-bold text-slate-600 focus:border-blue-600 outline-none bg-transparent">
-                                    <option :value="1">Hot Coffee</option>
-                                    <option :value="2">Iced Coffee</option>
-                                    <option :value="3">Pastries</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="bg-slate-50 p-5 rounded-3xl">
-                        <label class="text-xs font-bold uppercase text-slate-400 mb-3 block">Options</label>
-                        <div class="flex flex-col sm:flex-row gap-2 mb-3">
-                            <input v-model="newOptionName" placeholder="Name" class="flex-1 bg-white rounded-xl px-4 py-2 text-xs font-bold outline-none shadow-sm" />
-                            <input v-model="newOptionValues" placeholder="Values (comma split)" class="flex-2 bg-white rounded-xl px-4 py-2 text-xs font-bold outline-none shadow-sm" />
-                            <button type="button" @click="addOptionGroup" class="bg-blue-600 text-white p-2 rounded-xl self-end sm:self-auto"><Plus size="16" /></button>
-                        </div>
-                        <div class="flex flex-wrap gap-2">
-                            <div v-for="(opt, i) in productForm.options" :key="i" class="bg-white px-3 py-1 rounded-lg text-xs font-bold text-slate-600 shadow-sm flex items-center gap-2">
-                                {{ opt.name }} <button type="button" @click="removeOptionGroup(i)" class="text-red-400"><X size="12" /></button>
-                            </div>
-                        </div>
-                    </div>
-                     <div class="flex flex-col sm:flex-row justify-between items-center pt-2 gap-4">
-                        <label class="flex items-center gap-2 cursor-pointer self-start sm:self-center"><input type="checkbox" v-model="productForm.is_available" class="w-5 h-5 rounded text-blue-600 focus:ring-0" /><span class="text-sm font-bold text-slate-500">Available</span></label>
-                        <div class="flex gap-3 w-full sm:w-auto">
-                            <button type="button" @click="showProductModal = false" class="flex-1 sm:flex-none px-6 py-3 rounded-2xl font-bold text-slate-400 hover:bg-slate-50 transition-colors">Cancel</button>
-                            <button type="submit" class="flex-1 sm:flex-none bg-blue-600 text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-colors">Save</button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
     </div>
 </template>
