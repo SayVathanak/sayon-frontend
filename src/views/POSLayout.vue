@@ -5,21 +5,24 @@ import { useMenuStore } from '../stores/menu';
 import { useCartStore } from '../stores/cart';
 import { sendToCustomer } from '../services/dualScreen';
 import { useAutoAnimate } from '@formkit/auto-animate/vue';
+import { useRouter } from 'vue-router'; 
 import ReceiptTemplate from '../components/ReceiptTemplate.vue';
 import {
     LogOut, Search, ShoppingBag, Plus, Minus, X,
     Coffee, Loader2, Printer, Monitor, Settings, Check,
-    User, Menu, Droplets
+    User, Menu, LayoutDashboard 
 } from 'lucide-vue-next';
 
 // --- STORES ---
 const auth = useAuthStore();
 const menu = useMenuStore();
 const cart = useCartStore();
+const router = useRouter(); 
 
 // --- REFS & STATE ---
 const [cartListRef] = useAutoAnimate();
 const showMobileCart = ref(false);
+const showMobileMenu = ref(false); // NEW: Controls Left Sidebar on Mobile
 const searchQuery = ref('');
 const activeCategory = ref('All');
 const isPaymentMode = ref(false);
@@ -71,13 +74,8 @@ const lastSelectedSugar = reactive({});
 
 // --- WRAPPER ACTION: Updates state and calls original handler
 function handleProductClickWrapper(product, sugarLevel) {
-    // 1. Update the state tracker
     lastSelectedSugar[product.product_id] = sugarLevel;
-
-    // 2. Call your original business logic
-    // If the click came from the Plus button, pass null for default logic.
     const finalSugar = sugarLevel === 'Default' ? null : sugarLevel;
-
     handleProductClick(product, finalSugar);
 }
 
@@ -93,36 +91,39 @@ watch(() => cart.cartItems, (newItems) => {
 
 function openCustomerScreen() {
     window.open('/customer', 'CustomerDisplay', 'width=1000,height=800,menubar=no,toolbar=no');
+    showMobileMenu.value = false; // Close menu on mobile click
 }
 
 // --- ACTIONS ---
-function handleLogout() { auth.logout(); }
+function handleLogout() { 
+    auth.logout(); 
+    showMobileMenu.value = false;
+}
+
+function goToAdmin() {
+    router.push({ name: 'admin-dashboard' });
+    showMobileMenu.value = false;
+}
 
 function handleProductClick(product, sugarLevel = null) {
     if (isPaymentMode.value) return;
 
     let optionsText = '';
 
-    // 1. Handle "Sugar" overrides from the footer buttons
     if (sugarLevel) {
         optionsText = sugarLevel;
     }
-    // 2. Handle existing backend options
     else if (product.options && product.options.length > 0) {
         optionsText = product.options.map(opt => opt.values[0]).join(', ');
     }
 
-    // --- FIX START ---
-    // We create a "Signature ID" based only on the ID + Options. 
-    // We remove Date.now() so identical items generate the identical ID.
     const uniqueId = optionsText
         ? `${product.product_id}-${optionsText}`
         : `${product.product_id}`;
-    // --- FIX END ---
 
     const productToAdd = {
         ...product,
-        product_id: uniqueId, // Use the stable ID
+        product_id: uniqueId,
         original_id: product.product_id,
         name: optionsText ? `${product.name} (${optionsText})` : product.name,
         price: product.price,
@@ -178,28 +179,43 @@ async function handlePaymentSuccess() {
 
         <ReceiptTemplate v-if="lastOrder" :orderId="lastOrder.id" :items="lastOrder.items" :total="lastOrder.total" />
 
-        <aside class="hidden md:flex flex-col w-16 bg-[#000000] h-full shrink-0 z-20
-         items-center py-6 gap-6 rounded-r-3xl ">
-            <!-- Top -->
-            <div class="w-10 h-10 text-gray-400 flex items-center justify-center rounded-xl mb-4">
-                <Menu size="20" stroke-width="2.5" />
-            </div>
+        <div v-if="showMobileMenu" @click="showMobileMenu = false"
+             class="fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity">
+        </div>
 
-            <!-- Bottom -->
-            <div class="mt-auto pb-4 flex flex-col items-center gap-12">
+        <aside 
+            class="fixed inset-y-0 left-0 z-50 flex flex-col w-16 bg-[#000000] h-full shrink-0 
+                   items-center py-6 gap-6 rounded-r-3xl transition-transform duration-300
+                   md:relative md:translate-x-0"
+            :class="showMobileMenu ? 'translate-x-0' : '-translate-x-full'">
+            
+            <button @click="showMobileMenu = !showMobileMenu" 
+                class="w-10 h-10 text-gray-400 flex items-center justify-center rounded-xl mb-4 hover:text-white transition-colors">
+                <X v-if="showMobileMenu" size="20" class="md:hidden" />
+                <Menu v-else size="20" stroke-width="2.5" />
+            </button>
+
+            <div class="mt-auto pb-4 flex flex-col items-center gap-6">
+
+                <button v-if="auth.user?.role === 'admin'" @click="goToAdmin" 
+                    title="Go to Admin Dashboard"
+                    class="flex items-center justify-center text-gray-400 hover:text-white transition-colors cursor-pointer mb-6 border-b border-gray-800 pb-6">
+                    <LayoutDashboard size="20" />
+                </button>
 
                 <button @click="openCustomerScreen" class="w-10 h-10 rounded-xl flex items-center justify-center
-             text-gray-400 cursor-pointer">
+             text-gray-400 hover:text-white transition-colors cursor-pointer" title="Open Customer View">
                     <Monitor size="20" />
                 </button>
 
-                <button @click="showSettingsModal = true" class="w-10 h-10 rounded-xl flex items-center justify-center
-             text-gray-400 cursor-pointer">
+                <button @click="() => { showSettingsModal = true; showMobileMenu = false; }" 
+                    class="w-10 h-10 rounded-xl flex items-center justify-center
+             text-gray-400 hover:text-white transition-colors cursor-pointer" title="Settings">
                     <Settings size="20" />
                 </button>
 
                 <button @click="handleLogout" class="w-10 h-10 rounded-xl flex items-center justify-center
-             text-gray-400 hover:text-red-400 transition-colors">
+             text-gray-400 hover:text-red-400 transition-colors" title="Logout">
                     <LogOut size="20" />
                 </button>
             </div>
@@ -209,27 +225,36 @@ async function handlePaymentSuccess() {
             :class="{ 'opacity-50 pointer-events-none grayscale': isPaymentMode }">
 
             <header class="flex items-center justify-between mb-6">
-                <div class="flex items-center gap-8 flex-1">
+                <div class="flex items-center gap-4 md:gap-8 flex-1">
+                    
+                    <!-- <button @click="showMobileMenu = true" 
+                        class="md:hidden text-[#000000] flex items-center justify-center shadow-sm active:bg-gray-100">
+                        <Menu size="20" />
+                    </button> -->
+
                     <div>
-                        <h1 class="text-xl md:text-2xl font-preahvihear font-medium text-[#000000]">សាយ័ណ្ហកាហ្វេ</h1>
+                        <button @click="showMobileMenu = true" 
+                            class="text-xl md:text-2xl font-preahvihear font-medium text-[#000000]">សាយ័ណ្ហកាហ្វេ
+                        </button>
                         <p class="text-xs font-medium text-gray-400 mt-1">{{ formattedTime }}</p>
                     </div>
 
                     <div class="relative w-full max-w-md hidden lg:block">
                         <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size="18" />
                         <input v-model="searchQuery" type="text" placeholder="Search menu..."
-                            class="w-full pl-11 pr-4 h-11 bg-white rounded-xl text-sm  focus:outline-none text-[#000000] placeholder-gray-300">
+                            class="w-full pl-11 pr-4 h-11 bg-white rounded-xl text-sm focus:outline-none text-[#000000] placeholder-gray-300">
                     </div>
                 </div>
 
                 <div class="flex items-center gap-4">
+
                     <div class="flex items-center gap-3 ml-2 bg-white pl-2 pr-4 py-1.5 rounded-full ">
                         <div class="w-8 h-8 rounded-full bg-[#000000] text-white flex items-center justify-center">
                             <User size="14" />
                         </div>
-                        <div class="hidden lg:block text-left">
+                        <div class="text-left">
                             <p class="text-xs font-medium text-[#000000]">{{ auth.userName }}</p>
-                            <p class="text-[10px] text-gray-400">Staff</p>
+                            <p class="text-[10px] text-gray-400 capitalize">{{ auth.user?.role || 'Staff' }}</p>
                         </div>
                     </div>
                 </div>
@@ -272,11 +297,6 @@ async function handlePaymentSuccess() {
                             <div v-else class="w-full h-full flex items-center justify-center text-gray-300">
                                 <Coffee size="32" />
                             </div>
-
-                            <!-- <div @click.stop="handleProductClick(product)"
-                                class="absolute top-2 right-2 w-8 h-8 rounded-full bg-[#AA2B1D] text-white flex items-center justify-center cursor-pointer transform transition-transform group-hover:scale-110 active:scale-95">
-                                <Plus size="16" stroke-width="3" />
-                            </div> -->
                         </div>
 
                         <div class="flex flex-col flex-1">
@@ -345,11 +365,6 @@ async function handlePaymentSuccess() {
 
                 <div v-for="item in cart.cartItems" :key="item.product_id"
                     class="flex items-center gap-4 py-4 border-b border-gray-50 last:border-0 group">
-                    <!-- <div
-                        class="w-12 aspect-square rounded-xl overflow-hidden shrink-0 border border-gray-100 bg-gray-50">
-                        <img v-if="item.image_url" :src="getThumbnail(item.image_url)"
-                            class="w-full h-full object-cover" />
-                    </div> -->
 
                     <div class="flex-1 min-w-0">
                         <p class="font-medium text-sm text-[#000000] truncate">{{ item.name }}</p>
