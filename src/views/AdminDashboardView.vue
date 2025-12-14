@@ -8,7 +8,8 @@ import ProductManager from '../components/admin/ProductManager.vue';
 import { useRouter } from 'vue-router';
 import {
     LayoutDashboard, ShoppingBag, Store, LogOut, Menu, Layers,
-    TrendingUp, DollarSign, ShoppingCart, Calendar, Filter, ChevronRight, Plus, Trash2
+    TrendingUp, DollarSign, ShoppingCart, Calendar, Filter, ChevronRight, Plus, Trash2,
+    Monitor // 1. Added Monitor icon for the POS button
 } from 'lucide-vue-next';
 
 const auth = useAuthStore();
@@ -46,22 +47,17 @@ const averageOrderValue = computed(() => {
     return stats.totalOrders > 0 ? (stats.totalSales / stats.totalOrders).toFixed(2) : '0.00';
 });
 
-// Smart Revenue Display: Switches between Global Total and Branch Specific Total
 const displayedRevenue = computed(() => {
-    // 1. If "All Branches" is selected, use the global stats
     if (reportBranch.value === 'all') {
         return stats.totalSales;
     }
-    // 2. If a specific branch is selected, try to get the number from the Branch Stats
     if (branchStats.value.length > 0) {
         return branchStats.value.reduce((sum, b) => sum + Number(b.total_revenue || 0), 0);
     }
-    // 3. Fallback
     return stats.totalSales;
 });
 
 const periodLabel = computed(() => {
-    // Make sure the closing brace '}' is AFTER 'Custom Range'
     const labels = { 
         today: 'Today', 
         week: 'This Week', 
@@ -73,7 +69,6 @@ const periodLabel = computed(() => {
 
 // --- WATCHERS ---
 watch([reportPeriod, reportBranch, customStartDate, customEndDate], () => {
-    // If custom is selected but dates are empty, don't fetch yet
     if (reportPeriod.value === 'custom' && (!customStartDate.value || !customEndDate.value)) {
         return;
     }
@@ -98,19 +93,15 @@ onMounted(() => {
     fetchBranchPerformance();
 });
 
-// New helper to generate params for all 3 API calls
 function getApiParams() {
     const params = {
         period: reportPeriod.value,
         branch_id: reportBranch.value
     };
-
-    // If custom, attach specific dates
     if (reportPeriod.value === 'custom') {
         params.start_date = customStartDate.value;
         params.end_date = customEndDate.value;
     }
-
     return params;
 }
 
@@ -154,6 +145,11 @@ async function handleCreateBranch() {
 function handleLogout() {
     auth.logout();
     router.push({ name: 'login' });
+}
+
+// 2. Navigation Action for POS
+function goToPOS() {
+    router.push({ name: 'pos-main' });
 }
 </script>
 
@@ -222,6 +218,26 @@ function handleLogout() {
                         </div>
                     </button>
                 </template>
+
+                <div class="h-px bg-gray-100 my-2 mx-2"></div>
+
+                <button @click="goToPOS" :class="[
+                    'w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all duration-200 group relative',
+                    'text-slate-500 hover:bg-blue-50 hover:text-blue-600',
+                    sidebarCollapsed ? 'justify-center' : ''
+                ]">
+                    <Monitor :size="20" :stroke-width="2" class="text-slate-400 group-hover:text-blue-600" />
+                    <span v-if="!sidebarCollapsed" class="animate-in fade-in duration-200">Open POS System</span>
+
+                    <div v-if="sidebarCollapsed"
+                        class="absolute left-full ml-4 bg-slate-800 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 pointer-events-none whitespace-nowrap z-50 shadow-xl">
+                        Open POS
+                        <div
+                            class="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 border-4 border-transparent border-r-slate-800">
+                        </div>
+                    </div>
+                </button>
+
             </nav>
 
             <div class="p-4 border-t border-gray-50">
